@@ -10,11 +10,14 @@ def record(
     action: str,
     entity_type: str,
     entity_id: int | None,
+    *,
+    org_id: int,
     **details,
 ) -> None:
     """Add a log entry to the session; it's saved with the caller's commit."""
     session.add(
         ActivityLog(
+            org_id=org_id,
             actor_id=actor.id if actor else None,
             actor_email=actor.email if actor else None,
             action=action,

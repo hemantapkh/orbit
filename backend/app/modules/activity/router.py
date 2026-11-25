@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.core.deps import SessionDep
 from app.modules.activity.models import ActivityLog
-from app.modules.auth.deps import CurrentAdmin
+from app.modules.orgs.deps import Viewer
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
@@ -25,12 +25,16 @@ class ActivityOut(BaseModel):
 @router.get("", response_model=list[ActivityOut])
 async def list_activity(
     session: SessionDep,
-    _: CurrentAdmin,
-    entity_type: Literal["bot", "campaign"] | None = None,
+    m: Viewer,
+    entity_type: Literal["bot", "campaign", "org"] | None = None,
     entity_id: int | None = None,
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    stmt = select(ActivityLog).order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+    stmt = (
+        select(ActivityLog)
+        .where(ActivityLog.org_id == m.org_id)
+        .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+    )
     if entity_type:
         stmt = stmt.where(ActivityLog.entity_type == entity_type)
     if entity_id is not None:

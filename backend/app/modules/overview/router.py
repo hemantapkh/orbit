@@ -7,11 +7,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.core.deps import SessionDep
-from app.modules.auth.deps import CurrentAdmin
 from app.modules.bots.models import Bot
 from app.modules.campaigns import service as campaigns
 from app.modules.campaigns.models import Campaign
 from app.modules.campaigns.schemas import DeliveryStats
+from app.modules.orgs.deps import Viewer
 from app.modules.sources.service import counts_by_bot, unique_active_people
 
 router = APIRouter(prefix="/overview", tags=["overview"])
@@ -51,9 +51,9 @@ class Overview(BaseModel):
 
 
 @router.get("", response_model=Overview)
-async def overview(session: SessionDep, _: CurrentAdmin):
-    bots = (await session.scalars(select(Bot))).all()
-    counts = await counts_by_bot(session)
+async def overview(session: SessionDep, m: Viewer):
+    bots = (await session.scalars(select(Bot).where(Bot.org_id == m.org_id))).all()
+    counts = await counts_by_bot(session, [b.id for b in bots])
     lines = sorted(
         (
             BotLine(
@@ -71,14 +71,19 @@ async def overview(session: SessionDep, _: CurrentAdmin):
         reverse=True,
     )
     recent = (
-        await session.scalars(select(Campaign).order_by(Campaign.created_at.desc()).limit(6))
+        await session.scalars(
+            select(Campaign)
+            .where(Campaign.org_id == m.org_id)
+            .order_by(Campaign.created_at.desc())
+            .limit(6)
+        )
     ).all()
     stats = await campaigns.delivery_stats(session, [c.id for c in recent])
     return Overview(
         bots=lines,
         total_bots=len(bots),
         total_active_subscribers=sum(line.active for line in lines),
-        unique_people=await unique_active_people(session),
+        unique_people=await unique_active_people(session, [b.id for b in bots]),
         recent_campaigns=[
             RecentCampaign(
                 id=c.id,

@@ -342,7 +342,7 @@ async def _markers(session: AsyncSession, p: Period, bot_ids: list[int]) -> list
 async def broadcasts(
     session: AsyncSession, range_: Range, bot_ids: list[int] | None
 ) -> BroadcastAnalytics:
-    ids = bot_ids or list((await session.scalars(select(CampaignBot.bot_id).distinct())).all())
+    ids = bot_ids
     p = period(
         range_, utcnow().date(), await _first_broadcast(session) if range_ == "all" else None
     )

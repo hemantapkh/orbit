@@ -8,8 +8,8 @@ from app.core.db import utcnow
 from app.core.deps import SessionDep
 from app.core.security import encrypt_secret
 from app.modules.activity.service import record
-from app.modules.auth.deps import CurrentAdmin
 from app.modules.bots.models import Bot
+from app.modules.orgs.deps import Admin, Member, Sender, Viewer, get_in_org
 from app.modules.sources import service
 from app.modules.sources.connection import (
     SourceError,
@@ -45,11 +45,14 @@ async def _source_for(session: AsyncSession, bot_id: int) -> BotSource | None:
     return await session.scalar(select(BotSource).where(BotSource.bot_id == bot_id))
 
 
-async def _resolve_url(session: AsyncSession, body: ConnectionIn) -> URL:
+async def _resolve_url(session: AsyncSession, body: ConnectionIn, m: Member) -> URL:
     """A URL typed in the setup flow, or the saved one when editing a bot's source."""
     try:
         if body.database_url:
             return normalize_url(body.database_url)
+        if body.bot_id is not None:
+            # The saved connection is only usable for bots in your organization.
+            await get_in_org(session, Bot, body.bot_id, m.org_id, "Bot")
         if body.bot_id is not None and (src := await _source_for(session, body.bot_id)):
             return service.url_of(src)
     except SourceError as exc:
@@ -64,8 +67,8 @@ async def _connection_info(engine, url: URL) -> ConnectionOut:
 
 
 @router.post("/sources/test", response_model=ConnectionOut)
-async def test_connection(body: ConnectionIn, session: SessionDep, _: CurrentAdmin):
-    url = await _resolve_url(session, body)
+async def test_connection(body: ConnectionIn, session: SessionDep, m: Admin):
+    url = await _resolve_url(session, body, m)
     try:
         async with temporary_engine(url) as engine:
             return await _connection_info(engine, url)
@@ -74,8 +77,8 @@ async def test_connection(body: ConnectionIn, session: SessionDep, _: CurrentAdm
 
 
 @router.post("/sources/introspect", response_model=IntrospectOut)
-async def introspect(body: ConnectionIn, session: SessionDep, _: CurrentAdmin):
-    url = await _resolve_url(session, body)
+async def introspect(body: ConnectionIn, session: SessionDep, m: Admin):
+    url = await _resolve_url(session, body, m)
     try:
         async with temporary_engine(url) as engine:
             info = await _connection_info(engine, url)
@@ -87,8 +90,8 @@ async def introspect(body: ConnectionIn, session: SessionDep, _: CurrentAdmin):
 
 
 @router.post("/sources/preview", response_model=PreviewOut)
-async def preview(body: PreviewIn, session: SessionDep, _: CurrentAdmin):
-    url = await _resolve_url(session, body)
+async def preview(body: PreviewIn, session: SessionDep, m: Admin):
+    url = await _resolve_url(session, body, m)
     spec = SourceSpec.model_validate(body.model_dump(by_alias=True))
     try:
         async with temporary_engine(url) as engine:
@@ -123,24 +126,24 @@ def _out(source: BotSource | None) -> SourceOut:
     )
 
 
-async def _bot_and_source(session: AsyncSession, bot_id: int) -> tuple[Bot, BotSource | None]:
-    bot = await session.get(Bot, bot_id)
-    if bot is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Bot not found")
+async def _bot_and_source(
+    session: AsyncSession, bot_id: int, m: Member
+) -> tuple[Bot, BotSource | None]:
+    bot = await get_in_org(session, Bot, bot_id, m.org_id, "Bot")
     return bot, await _source_for(session, bot_id)
 
 
 @router.get("/bots/{bot_id}/source", response_model=SourceOut)
-async def get_source(bot_id: int, session: SessionDep, _: CurrentAdmin):
-    _, source = await _bot_and_source(session, bot_id)
+async def get_source(bot_id: int, session: SessionDep, m: Viewer):
+    _, source = await _bot_and_source(session, bot_id, m)
     if source is not None and source.kind == SourceKind.DATABASE:
         await service.live_ids(session, source)  # refreshes health + cached count if stale
     return _out(source)
 
 
 @router.put("/bots/{bot_id}/source", response_model=SourceOut)
-async def save_source(bot_id: int, body: SourceSaveIn, session: SessionDep, admin: CurrentAdmin):
-    _, source = await _bot_and_source(session, bot_id)
+async def save_source(bot_id: int, body: SourceSaveIn, session: SessionDep, m: Admin):
+    _, source = await _bot_and_source(session, bot_id, m)
     try:
         if body.database_url:
             url = normalize_url(body.database_url)
@@ -174,10 +177,11 @@ async def save_source(bot_id: int, body: SourceSaveIn, session: SessionDep, admi
     source.cached_count, source.cached_count_at = result.total, now
     record(
         session,
-        admin,
+        m.user,
         "source.saved",
         "bot",
         bot_id,
+        org_id=m.org_id,
         table=f"{spec.db_schema + '.' if spec.db_schema else ''}{spec.table}",
         url_changed=bool(body.database_url),
         reachable=result.total,
@@ -189,13 +193,13 @@ async def save_source(bot_id: int, body: SourceSaveIn, session: SessionDep, admi
 
 
 @router.delete("/bots/{bot_id}/source", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_source(bot_id: int, session: SessionDep, admin: CurrentAdmin):
+async def delete_source(bot_id: int, session: SessionDep, m: Admin):
     """Disconnect the bot's database. Suppressions are kept."""
-    _, source = await _bot_and_source(session, bot_id)
+    _, source = await _bot_and_source(session, bot_id, m)
     if source is not None:
         await engines.drop(source.id)
         service.id_cache.drop(source.id)
-        record(session, admin, "source.removed", "bot", bot_id)
+        record(session, m.user, "source.removed", "bot", bot_id, org_id=m.org_id)
         await session.delete(source)
         await session.commit()
 
@@ -212,11 +216,11 @@ class PersonOut(BaseModel):
 async def search_people(
     bot_id: int,
     session: SessionDep,
-    _: CurrentAdmin,
+    m: Sender,
     q: str = Query(min_length=1, max_length=100),
 ):
     """Search a bot's users to hand-pick recipients."""
-    await _bot_and_source(session, bot_id)
+    await _bot_and_source(session, bot_id, m)
     try:
         return await service.search_people(session, bot_id, q)
     except Exception as exc:

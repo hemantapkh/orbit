@@ -14,11 +14,11 @@ from app.integrations.telegram.bots import (
 )
 from app.integrations.telegram.client import TelegramClient
 from app.modules.activity.service import record
-from app.modules.auth.deps import CurrentAdmin
 from app.modules.bots.models import Bot
 from app.modules.bots.profile import avatar_path, sync_profile
 from app.modules.bots.schemas import BotCreate, BotOut, BotUpdate
 from app.modules.campaigns.models import Delivery
+from app.modules.orgs.deps import Admin, Member, Sender, Viewer, get_in_org
 from app.modules.sources.schemas import SubscriberCounts
 from app.modules.sources.service import counts_by_bot, database_sources, id_cache
 
@@ -42,11 +42,8 @@ def to_out(bot: Bot, counts: SubscriberCounts) -> BotOut:
     )
 
 
-async def _get_bot(session, bot_id: int) -> Bot:
-    bot = await session.get(Bot, bot_id)
-    if bot is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Bot not found")
-    return bot
+async def _get_bot(session, bot_id: int, m: Member) -> Bot:
+    return await get_in_org(session, Bot, bot_id, m.org_id, "Bot")
 
 
 async def _identify(telegram: TelegramClient, token: str) -> BotIdentity:
@@ -59,20 +56,21 @@ async def _identify(telegram: TelegramClient, token: str) -> BotIdentity:
 
 
 @router.get("", response_model=list[BotOut])
-async def list_bots(session: SessionDep, _: CurrentAdmin):
-    bots = (await session.scalars(select(Bot).order_by(Bot.display_name))).all()
-    counts = await counts_by_bot(session)
+async def list_bots(session: SessionDep, m: Viewer):
+    bots = (
+        await session.scalars(select(Bot).where(Bot.org_id == m.org_id).order_by(Bot.display_name))
+    ).all()
+    counts = await counts_by_bot(session, [b.id for b in bots])
     return [to_out(b, counts[b.id]) for b in bots]
 
 
 @router.post("", response_model=BotOut, status_code=status.HTTP_201_CREATED)
-async def connect_bot(
-    body: BotCreate, session: SessionDep, telegram: TelegramDep, admin: CurrentAdmin
-):
+async def connect_bot(body: BotCreate, session: SessionDep, telegram: TelegramDep, m: Admin):
     me = await _identify(telegram, body.token)
     if await session.scalar(select(Bot.id).where(Bot.telegram_id == me.telegram_id)):
         raise HTTPException(status.HTTP_409_CONFLICT, f"@{me.username} is already connected")
     bot = Bot(
+        org_id=m.org_id,
         telegram_id=me.telegram_id,
         username=me.username,
         display_name=me.display_name,
@@ -82,24 +80,24 @@ async def connect_bot(
     session.add(bot)
     await session.flush()
     await sync_profile(telegram, bot)
-    record(session, admin, "bot.connected", "bot", bot.id, username=bot.username)
+    record(session, m.user, "bot.connected", "bot", bot.id, org_id=m.org_id, username=bot.username)
     await session.commit()
     await session.refresh(bot)
     return to_out(bot, SubscriberCounts())
 
 
 @router.get("/{bot_id}", response_model=BotOut)
-async def get_bot(bot_id: int, session: SessionDep, _: CurrentAdmin):
-    bot = await _get_bot(session, bot_id)
+async def get_bot(bot_id: int, session: SessionDep, m: Viewer):
+    bot = await _get_bot(session, bot_id, m)
     counts = await counts_by_bot(session, [bot.id])
     return to_out(bot, counts[bot.id])
 
 
 @router.patch("/{bot_id}", response_model=BotOut)
 async def update_bot(
-    bot_id: int, body: BotUpdate, session: SessionDep, telegram: TelegramDep, admin: CurrentAdmin
+    bot_id: int, body: BotUpdate, session: SessionDep, telegram: TelegramDep, m: Admin
 ):
-    bot = await _get_bot(session, bot_id)
+    bot = await _get_bot(session, bot_id, m)
     if body.token is not None:
         me = await _identify(telegram, body.token)
         if me.telegram_id != bot.telegram_id:
@@ -113,15 +111,16 @@ async def update_bot(
         bot.is_active = body.is_active
     record(
         session,
-        admin,
+        m.user,
         "bot.updated",
         "bot",
         bot.id,
+        org_id=m.org_id,
         changed=sorted(body.model_dump(exclude_none=True)),  # field names only, never values
         is_active=body.is_active,
     )
     await session.commit()
-    return await get_bot(bot_id, session, admin)
+    return await get_bot(bot_id, session, m)
 
 
 async def _recheck(session, telegram, bot: Bot) -> None:
@@ -138,35 +137,37 @@ async def _recheck(session, telegram, bot: Bot) -> None:
 
 
 @router.post("/refresh", response_model=list[BotOut])
-async def refresh_all(session: SessionDep, telegram: TelegramDep, _: CurrentAdmin):
+async def refresh_all(session: SessionDep, telegram: TelegramDep, m: Sender):
     """Refresh every bot. One bot failing (e.g. Telegram hiccup) doesn't stop the others."""
-    bots = (await session.scalars(select(Bot).order_by(Bot.display_name))).all()
+    bots = (
+        await session.scalars(select(Bot).where(Bot.org_id == m.org_id).order_by(Bot.display_name))
+    ).all()
     for bot in bots:
         try:
             await _recheck(session, telegram, bot)
         except TelegramUnavailable:
             pass
     await session.commit()
-    counts = await counts_by_bot(session)
+    counts = await counts_by_bot(session, [b.id for b in bots])
     return [to_out(b, counts[b.id]) for b in bots]
 
 
 @router.post("/{bot_id}/refresh", response_model=BotOut)
-async def refresh_bot(bot_id: int, session: SessionDep, telegram: TelegramDep, _: CurrentAdmin):
+async def refresh_bot(bot_id: int, session: SessionDep, telegram: TelegramDep, m: Sender):
     """Refresh one bot from Telegram and recount its audience."""
-    bot = await _get_bot(session, bot_id)
+    bot = await _get_bot(session, bot_id, m)
     try:
         await _recheck(session, telegram, bot)
     except TelegramUnavailable as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
     await session.commit()
-    return await get_bot(bot_id, session, _)
+    return await get_bot(bot_id, session, m)
 
 
 @router.get("/{bot_id}/avatar")
-async def bot_avatar(bot_id: int, session: SessionDep, _: CurrentAdmin):
+async def bot_avatar(bot_id: int, session: SessionDep, m: Viewer):
     """The bot's Telegram profile photo, served by Orbit (Telegram's link holds the token)."""
-    bot = await _get_bot(session, bot_id)
+    bot = await _get_bot(session, bot_id, m)
     path = avatar_path(bot.id)
     if not bot.avatar_version or not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No photo")
@@ -179,13 +180,13 @@ async def bot_avatar(bot_id: int, session: SessionDep, _: CurrentAdmin):
 
 
 @router.delete("/{bot_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_bot(bot_id: int, session: SessionDep, admin: CurrentAdmin):
-    bot = await _get_bot(session, bot_id)
+async def delete_bot(bot_id: int, session: SessionDep, m: Admin):
+    bot = await _get_bot(session, bot_id, m)
     if await session.scalar(select(exists().where(Delivery.bot_id == bot.id))):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "This bot has campaign history. Disable it instead to keep the records.",
         )
-    record(session, admin, "bot.removed", "bot", bot.id, username=bot.username)
+    record(session, m.user, "bot.removed", "bot", bot.id, org_id=m.org_id, username=bot.username)
     await session.delete(bot)
     await session.commit()

@@ -23,12 +23,15 @@ from app.modules.campaigns.public import router as public_shares_router
 from app.modules.campaigns.router import router as campaigns_router
 from app.modules.campaigns.test_groups import router as test_groups_router
 from app.modules.media.router import router as media_router
+from app.modules.orgs.router import public as invites_router
+from app.modules.orgs.router import router as orgs_router
 from app.modules.overview.router import router as overview_router
 from app.modules.sources.connection import engines as source_engines
 from app.modules.sources.router import router as sources_router
 
 ADMIN_ROUTERS = [
     auth_router,
+    orgs_router,
     overview_router,
     bots_router,
     sources_router,
@@ -40,7 +43,7 @@ ADMIN_ROUTERS = [
 ]
 
 # No session; the share token in the URL is the credential (see campaigns/public.py).
-PUBLIC_ROUTERS = [public_shares_router]
+PUBLIC_ROUTERS = [public_shares_router, invites_router]
 
 
 class _HideShareTokens(logging.Filter):

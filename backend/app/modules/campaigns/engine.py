@@ -148,8 +148,16 @@ class DeliveryEngine:
                 if audience.mode == "selected":
                     await self._snapshot_selected(s, cid, audience)
                 else:
-                    await self._snapshot_database_audiences(s, cid)
-                record(s, None, "campaign.started", "campaign", cid, audience=audience.mode)
+                    await self._snapshot_database_audiences(s, cid, campaign.org_id)
+                record(
+                    s,
+                    None,
+                    "campaign.started",
+                    "campaign",
+                    cid,
+                    org_id=campaign.org_id,
+                    audience=audience.mode,
+                )
                 await s.commit()
                 log.info("Campaign %s started", cid)
 
@@ -187,7 +195,7 @@ class DeliveryEngine:
             await s.execute(insert(Delivery), rows)
 
     @staticmethod
-    async def _snapshot_database_audiences(s: AsyncSession, campaign_id: int) -> None:
+    async def _snapshot_database_audiences(s: AsyncSession, campaign_id: int, org_id: int) -> None:
         """Read each database-source bot's recipients from its own database.
 
         A bot's list is read completely before anything is inserted, so a failure midway
@@ -212,6 +220,7 @@ class DeliveryEngine:
                     "source.failed",
                     "bot",
                     bot_id,
+                    org_id=org_id,
                     campaign_id=campaign_id,
                     error=source.last_error,
                 )
@@ -266,7 +275,7 @@ class DeliveryEngine:
                     .values(status=CampaignStatus.COMPLETED, finished_at=utcnow())
                 )
                 if done.rowcount == 1:
-                    record(s, None, "campaign.completed", "campaign", campaign_id)
+                    record(s, None, "campaign.completed", "campaign", campaign_id, org_id=c.org_id)
                 await s.commit()
                 log.info("Campaign %s completed", campaign_id)
                 return False

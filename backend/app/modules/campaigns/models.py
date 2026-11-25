@@ -31,6 +31,9 @@ class Campaign(Base, TimestampMixin):
     __tablename__ = "campaigns"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(160))
     status: Mapped[str] = mapped_column(String(16), default=CampaignStatus.DRAFT, index=True)
     message: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -58,6 +61,9 @@ class TestGroup(Base, TimestampMixin):
     __tablename__ = "test_groups"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(120))
     # [{bot_id, chat_id, label, kind}]
     members: Mapped[list] = mapped_column(JSON, default=list)

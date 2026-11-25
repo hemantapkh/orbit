@@ -245,9 +245,9 @@ async def database_counts(
     return out
 
 
-async def database_people(session: AsyncSession) -> set[int]:
+async def database_people(session: AsyncSession, bot_ids: list[int]) -> set[int]:
     people: set[int] = set()
-    for source in (await database_sources(session)).values():
+    for source in (await database_sources(session, bot_ids)).values():
         ids = await live_ids(session, source)
         if ids is not None:
             people |= ids
@@ -309,6 +309,6 @@ async def active_audience_size(session: AsyncSession, bot_ids: list[int]) -> int
     return sum(counts[b].active for b in bot_ids)
 
 
-async def unique_active_people(session: AsyncSession) -> int:
+async def unique_active_people(session: AsyncSession, bot_ids: list[int]) -> int:
     """Distinct people across all bots (private chat_id == Telegram user id)."""
-    return len(await database_people(session))
+    return len(await database_people(session, bot_ids))

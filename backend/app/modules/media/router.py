@@ -7,9 +7,9 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.core.deps import SessionDep
-from app.modules.auth.deps import CurrentAdmin
 from app.modules.media.models import MediaAsset
 from app.modules.media.service import infer_kind, new_storage_key, storage_path
+from app.modules.orgs.deps import Sender, Viewer, get_in_org
 
 router = APIRouter(prefix="/media", tags=["media"])
 
@@ -39,7 +39,7 @@ def to_out(a: MediaAsset) -> MediaOut:
 @router.post("", response_model=MediaOut, status_code=status.HTTP_201_CREATED)
 async def upload_media(
     session: SessionDep,
-    _: CurrentAdmin,
+    m: Sender,
     file: UploadFile,
     kind: Literal["photo", "video", "document", "animation"] | None = Form(default=None),
 ):
@@ -65,6 +65,7 @@ async def upload_media(
             out.write(chunk)
 
     asset = MediaAsset(
+        org_id=m.org_id,
         kind=kind or infer_kind(content_type),
         filename=filename,
         content_type=content_type,
@@ -77,17 +78,15 @@ async def upload_media(
 
 
 @router.get("/{media_id}", response_model=MediaOut)
-async def get_media(media_id: int, session: SessionDep, _: CurrentAdmin):
-    asset = await session.get(MediaAsset, media_id)
-    if asset is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Media not found")
+async def get_media(media_id: int, session: SessionDep, m: Viewer):
+    asset = await get_in_org(session, MediaAsset, media_id, m.org_id, "Media")
     return to_out(asset)
 
 
 @router.get("/{media_id}/file")
-async def media_file(media_id: int, session: SessionDep, _: CurrentAdmin):
-    asset = await session.get(MediaAsset, media_id)
-    if asset is None or not storage_path(asset.storage_key).exists():
+async def media_file(media_id: int, session: SessionDep, m: Viewer):
+    asset = await get_in_org(session, MediaAsset, media_id, m.org_id, "Media")
+    if not storage_path(asset.storage_key).exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Media not found")
     return FileResponse(
         storage_path(asset.storage_key), media_type=asset.content_type, filename=asset.filename

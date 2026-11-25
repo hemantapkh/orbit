@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, String, Text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin, UTCDateTime
@@ -12,6 +12,9 @@ class Bot(Base, TimestampMixin):
     __tablename__ = "bots"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True)
     username: Mapped[str] = mapped_column(String(64))
     display_name: Mapped[str] = mapped_column(String(128))

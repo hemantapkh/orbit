@@ -252,3 +252,10 @@ async def _reset_source_caches():
     yield
     id_cache._data.clear()
     await engines.dispose_all()
+
+
+@pytest.fixture(autouse=True)
+def _reset_login_throttle():
+    from app.modules.auth.router import _failures
+
+    _failures.clear()
