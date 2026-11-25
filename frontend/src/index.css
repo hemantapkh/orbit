@@ -28,10 +28,12 @@
   --color-status-info: #4f6fae;
   --color-status-off: #a9b3ae;
 
-  /* Delivery chart: validated pair (deutan ΔE 16, see docs/brand.md). Coral is < 3:1
-     on white, so the chart always ships with text labels and a table view. */
+  /* Delivery outcomes, stacked in this order. Validated as a set (worst adjacent CVD
+     ΔE 16.3). Coral is < 3:1 on white, so the chart always has labels and a table. */
   --color-chart-delivered: #1d6f45;
-  --color-chart-missed: #e8896c;
+  --color-chart-blocked: #e8896c;
+  --color-chart-unreachable: #5b6fd6;
+  --color-chart-failed: #b07d00;
 }
 
 :root {

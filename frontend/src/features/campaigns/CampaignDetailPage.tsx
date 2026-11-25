@@ -8,7 +8,7 @@ import { Button, buttonClass, CampaignStatusTag, cx, Notice, PageHeader, Panel, 
 import { ActivityList } from "../activity/ActivityList";
 import { confirmDelete } from "./CampaignsPage";
 import { DeliveryBar } from "./DeliveryBar";
-import { ErrorGroups, StatusPanel, TimelineChart } from "./Progress";
+import { ProgressInsights, StatusPanel } from "./Progress";
 import { MessagePreview } from "./MessagePreview";
 
 export function CampaignDetailPage() {
@@ -122,8 +122,7 @@ export function CampaignDetailPage() {
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-8">
           <StatusPanel c={c} progress={progress.data} />
-          {progress.data && <TimelineChart progress={progress.data} />}
-          {progress.data && <ErrorGroups errors={progress.data.errors} />}
+          {progress.data && <ProgressInsights progress={progress.data} bots={c.bots} />}
 
           <section>
             <h2 className="mb-3 text-lg font-semibold">By bot</h2>

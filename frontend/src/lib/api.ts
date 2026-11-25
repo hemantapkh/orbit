@@ -272,11 +272,14 @@ export type TestSendResult = { bot_id: number; chat_id: number; label: string; d
 
 // ---- broadcast progress -------------------------------------------------------------
 
-export type TimelineBucket = { start: string; delivered: number; not_delivered: number };
-export type ErrorGroup = { status: "failed" | "blocked"; error: string; count: number };
+export type Outcome = "delivered" | "blocked" | "unreachable" | "failed";
+export type TimelinePoint = { t: string; bot_id: number; outcome: Outcome; count: number };
+export type ErrorGroup = { bot_id: number; status: "failed" | "blocked"; error: string; count: number };
 export type Progress = {
   bucket_seconds: number;
-  timeline: TimelineBucket[];
+  start: string | null;
+  end: string | null;
+  points: TimelinePoint[];
   per_minute: number;
   eta_seconds: number | null;
   elapsed_seconds: number | null;
