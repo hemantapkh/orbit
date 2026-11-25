@@ -101,6 +101,8 @@ export type Campaign = {
   bot_ids: number[];
   audience: Audience;
   source_campaign_id: number | null;
+  /** how many times this message has been sent (list responses) */
+  send_count?: number;
   scheduled_at: string | null;
   started_at: string | null;
   finished_at: string | null;
