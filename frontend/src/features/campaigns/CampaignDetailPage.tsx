@@ -2,12 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { api, type CampaignDetail, type Delivery, type Media, type Page, type RelatedSend } from "../../lib/api";
-import { fmt, pct, when } from "../../lib/format";
+import { api, type CampaignDetail, type Delivery, type Media, type Page, type Progress, type RelatedSend } from "../../lib/api";
+import { fmt, when } from "../../lib/format";
 import { Button, buttonClass, CampaignStatusTag, cx, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
 import { ActivityList } from "../activity/ActivityList";
 import { confirmDelete } from "./CampaignsPage";
 import { DeliveryBar } from "./DeliveryBar";
+import { ErrorGroups, StatusPanel, TimelineChart } from "./Progress";
 import { MessagePreview } from "./MessagePreview";
 
 export function CampaignDetailPage() {
@@ -20,8 +21,14 @@ export function CampaignDetailPage() {
     queryFn: () => api<CampaignDetail>(`/campaigns/${campaignId}`),
     refetchInterval: (query) => {
       const s = query.state.data?.status;
-      return s === "running" ? 1500 : s === "scheduled" ? 5000 : false;
+      return s === "running" ? 3000 : s === "scheduled" ? 15000 : s === "paused" ? 15000 : false;
     },
+  });
+  const progress = useQuery({
+    queryKey: ["campaign-progress", campaignId, q.data?.status],
+    queryFn: () => api<Progress>(`/campaigns/${campaignId}/progress`),
+    enabled: !!q.data && q.data.status !== "draft",
+    refetchInterval: () => (q.data?.status === "running" ? 3000 : q.data?.status === "paused" ? 15000 : false),
   });
   const media = useQuery({
     queryKey: ["media", q.data?.message.media_id],
@@ -53,7 +60,6 @@ export function CampaignDetailPage() {
   if (q.error) return <Notice>{q.error.message}</Notice>;
   const c = q.data;
   const s = c.stats;
-  const done = s.sent + s.failed + s.blocked + s.skipped;
 
   const actions = (
     <>
@@ -115,40 +121,9 @@ export function CampaignDetailPage() {
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-8">
-          <Panel className="p-6">
-            {s.total === 0 ? (
-              <p className="text-ink-soft">
-                {c.status === "scheduled"
-                  ? `Sends ${when(c.scheduled_at)} to about ${fmt(c.bots.reduce((n, b) => n + b.audience, 0))} subscribers. The exact list is taken at send time.`
-                  : c.status === "draft"
-                    ? "Not sent yet."
-                    : c.status === "running"
-                      ? "Preparing the recipient list…"
-                      : "No subscribers were active on the selected bots."}
-              </p>
-            ) : (
-              <>
-                <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
-                  <div>
-                    <p className="text-[40px] leading-none font-semibold tracking-[-0.03em]">{pct(s.sent, s.total)}</p>
-                    <p className="mt-2 text-ink-soft">
-                      delivered · {fmt(s.sent)} of {fmt(s.total)} messages
-                    </p>
-                  </div>
-                  {s.pending > 0 && (
-                    <p className="text-sm text-ink-soft">{fmt(s.pending)} waiting · {pct(done, s.total)} processed</p>
-                  )}
-                </div>
-                <DeliveryBar stats={s} />
-                <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-                  <Stat label="Delivered" value={s.sent} dot="bg-status-ok" />
-                  <Stat label="Blocked the bot" value={s.blocked} dot="bg-status-error/70" />
-                  <Stat label="Failed" value={s.failed} dot="bg-status-error" />
-                  <Stat label="Skipped" value={s.skipped} dot="bg-line-strong" />
-                </dl>
-              </>
-            )}
-          </Panel>
+          <StatusPanel c={c} progress={progress.data} />
+          {progress.data && <TimelineChart progress={progress.data} />}
+          {progress.data && <ErrorGroups errors={progress.data.errors} />}
 
           <section>
             <h2 className="mb-3 text-lg font-semibold">By bot</h2>
@@ -188,8 +163,11 @@ export function CampaignDetailPage() {
           <ActivityList entityType="campaign" entityId={c.id} />
         </div>
 
-        <aside className="space-y-6">
-          <MessagePreview message={c.message} media={media.data ?? null} />
+        <aside className="space-y-6 lg:sticky lg:top-8 lg:self-start">
+          <section aria-label="Message">
+            <h2 className="mb-3 text-lg font-semibold">Message</h2>
+            <MessagePreview message={c.message} media={media.data ?? null} />
+          </section>
           <Panel className="divide-y divide-line text-sm">
             <Row k="Created" v={when(c.created_at)} />
             {c.scheduled_at && <Row k={c.started_at ? "Scheduled for" : "Sends at"} v={when(c.scheduled_at)} />}
@@ -248,18 +226,6 @@ function Problems({ campaignId, bots }: { campaignId: number; bots: CampaignDeta
         </div>
       )}
     </section>
-  );
-}
-
-function Stat({ label, value, dot }: { label: string; value: number; dot: string }) {
-  return (
-    <div>
-      <dt className="flex items-center gap-2 text-sm text-ink-soft">
-        <span className={`size-2.5 rounded-sm ${dot}`} />
-        {label}
-      </dt>
-      <dd className="mt-1 text-xl font-semibold">{fmt(value)}</dd>
-    </div>
   );
 }
 

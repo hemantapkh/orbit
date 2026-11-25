@@ -269,3 +269,17 @@ export type SourcePreview = { rows: Record<string, unknown>[]; total: number; wa
 export type TestMember = { bot_id: number; chat_id: number; label: string; kind: string };
 export type TestGroup = { id: number; name: string; members: TestMember[]; is_default: boolean; updated_at: string };
 export type TestSendResult = { bot_id: number; chat_id: number; label: string; delivered: boolean; error: string | null };
+
+// ---- broadcast progress -------------------------------------------------------------
+
+export type TimelineBucket = { start: string; delivered: number; not_delivered: number };
+export type ErrorGroup = { status: "failed" | "blocked"; error: string; count: number };
+export type Progress = {
+  bucket_seconds: number;
+  timeline: TimelineBucket[];
+  per_minute: number;
+  eta_seconds: number | null;
+  elapsed_seconds: number | null;
+  errors: ErrorGroup[];
+};
+export type Estimate = { recipients: number; seconds: number; bots: { bot_id: number; recipients: number }[] };

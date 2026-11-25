@@ -10,11 +10,12 @@ import {
   emptyMessage,
   type Media,
   type MessageContent,
+  type Estimate,
   type ParseMode,
   type TestGroup,
   type TestSendResult,
 } from "../../lib/api";
-import { fmt, toLocalInput, when } from "../../lib/format";
+import { duration, fmt, toLocalInput, when } from "../../lib/format";
 import { Button, buttonClass, cx, Dialog, fieldClass, StatusDot, Field, Input, Notice, PageHeader, Panel, Skeleton, Textarea } from "../../components/ui";
 import { MessagePreview } from "./MessagePreview";
 import { PeoplePicker } from "./PeoplePicker";
@@ -256,7 +257,11 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
         </div>
 
         <aside className="space-y-6 lg:sticky lg:top-8 lg:self-start">
-          <MessagePreview message={message} media={media.data ?? null} botName={selected[0] ? `@${selected[0].username}` : undefined} />
+          <ReachCard bots={selected} picked={picking ? recipients.length : null} />
+          <section aria-label="Preview">
+            <h2 className="mb-3 font-semibold">Preview</h2>
+            <MessagePreview message={message} media={media.data ?? null} botName={selected[0] ? `@${selected[0].username}` : undefined} />
+          </section>
           <TestPanel
             groups={testGroups.data}
             groupId={testGroupId}
@@ -469,6 +474,51 @@ function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange
         <span className="block text-sm text-ink-faint">{hint}</span>
       </span>
     </label>
+  );
+}
+
+/** Who this broadcast reaches, per bot, and roughly how long sending takes. */
+function ReachCard({ bots, picked }: { bots: Bot[]; picked: number | null }) {
+  const ids = bots.map((b) => b.id);
+  const est = useQuery({
+    queryKey: ["estimate", ids],
+    queryFn: () => api<Estimate>(`/campaigns/estimate?${ids.map((i) => `bot_ids=${i}`).join("&")}`),
+    enabled: ids.length > 0 && picked == null,
+    placeholderData: (prev) => prev,
+  });
+  const total = picked ?? est.data?.recipients ?? 0;
+  const perBot = new Map(est.data?.bots.map((b) => [b.bot_id, b.recipients]));
+
+  return (
+    <Panel className="p-5">
+      <h2 className="text-sm text-ink-soft">Reach</h2>
+      {!bots.length ? (
+        <p className="mt-1 text-sm text-ink-soft">Choose at least one bot to see who this reaches.</p>
+      ) : (
+        <>
+          <p className="mt-1 text-[32px] leading-none font-semibold tracking-[-0.02em]">{fmt(total)}</p>
+          <p className="mt-1.5 text-sm text-ink-soft">
+            {picked != null ? `selected ${picked === 1 ? "person" : "people"}` : "people who can receive it right now"}
+          </p>
+          {picked == null && bots.length > 1 && (
+            <ul className="mt-4 space-y-1.5 text-sm">
+              {bots.map((b) => (
+                <li key={b.id} className="flex justify-between gap-3">
+                  <span className="truncate text-ink-soft">@{b.username}</span>
+                  <span className="font-medium">{perBot.has(b.id) ? fmt(perBot.get(b.id)!) : "…"}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {picked == null && est.data && est.data.recipients > 0 && (
+            <p className="mt-4 border-t border-line pt-3 text-sm text-ink-soft">
+              Sending takes about <strong className="text-ink">{duration(est.data.seconds)}</strong> at Telegram's rate
+              {bots.length > 1 ? ", with bots sending in parallel." : "."}
+            </p>
+          )}
+        </>
+      )}
+    </Panel>
   );
 }
 
