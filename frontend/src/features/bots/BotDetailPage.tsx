@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api, type Bot } from "../../lib/api";
 import { ago, fmt, when } from "../../lib/format";
-import { Button, Dialog, Field, Input, Notice, Panel, Skeleton } from "../../components/ui";
+import { Button, cx, Dialog, Field, Input, Notice, Panel, Skeleton } from "../../components/ui";
 import { ActivityList } from "../activity/ActivityList";
 import { SourcePanel } from "../sources/SourcePanel";
 import { BotAvatar } from "../../components/BotAvatar";
@@ -29,7 +29,10 @@ export function BotDetailPage() {
   });
   const refresh = useMutation({
     mutationFn: () => api<Bot>(`/bots/${botId}/refresh`, { method: "POST" }),
-    onSuccess: done,
+    onSuccess: (b) => {
+      done(b);
+      qc.invalidateQueries({ queryKey: ["bots", botId, "source"] });
+    },
   });
   const remove = useMutation({
     mutationFn: () => api(`/bots/${botId}`, { method: "DELETE" }),
@@ -70,6 +73,10 @@ export function BotDetailPage() {
           </p>
           {b.about && <p className="mt-2 max-w-[64ch] text-ink-soft">{b.about}</p>}
         </div>
+        <Button onClick={() => refresh.mutate()} disabled={refresh.isPending} title="Re-check with Telegram and recount the audience" className="self-start">
+          <RefreshCw size={15} className={cx(refresh.isPending && "animate-spin")} />
+          {refresh.isPending ? "Refreshing…" : "Refresh"}
+        </Button>
       </header>
 
       <div className="space-y-8">
@@ -116,7 +123,7 @@ export function BotDetailPage() {
               <p className="mt-2 text-sm text-ink-soft">{b.about || "Not set."}</p>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-sm">
-              <span className="text-ink-faint">Photo, name and texts are managed in Telegram. Orbit refreshes them when you press Check now.</span>
+              <span className="text-ink-faint">Photo, name and texts are managed in Telegram. Orbit refreshes them when you press Refresh.</span>
               <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="font-medium text-accent-deep underline-offset-4 hover:underline">
                 Edit in @BotFather
               </a>
@@ -131,9 +138,6 @@ export function BotDetailPage() {
               title="Token"
               body={b.token_valid ? `Accepted by Telegram, checked ${ago(b.last_checked_at)}` : "Rejected by Telegram"}
             >
-              <Button size="sm" variant="ghost" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
-                {refresh.isPending ? "Checking…" : "Check now"}
-              </Button>
               <Button size="sm" onClick={() => setTokenOpen(true)}>Replace</Button>
             </Setting>
             <Setting

@@ -1,23 +1,43 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { BotAvatar } from "../../components/BotAvatar";
 import { api, type Bot } from "../../lib/api";
 import { fmt } from "../../lib/format";
-import { Button, Dialog, Field, Input, StatusDot, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
+import { Button, cx, Dialog, Field, Input, StatusDot, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
 
 export function BotsPage() {
   const [connecting, setConnecting] = useState(false);
   const bots = useQuery({ queryKey: ["bots"], queryFn: () => api<Bot[]>("/bots") });
+  const qc = useQueryClient();
+  const refresh = useMutation({
+    mutationFn: () => api<Bot[]>("/bots/refresh", { method: "POST" }),
+    onSuccess: (fresh) => {
+      qc.setQueryData(["bots"], fresh);
+      qc.invalidateQueries({ queryKey: ["overview"] });
+      qc.invalidateQueries({ queryKey: ["bots"], exact: false, refetchType: "none" });
+    },
+  });
 
   return (
     <>
       <PageHeader
         title="Bots"
         lede="Each bot keeps its own code and database. Orbit sends with the bot's token and reads who it can reach from its database, read-only."
-        actions={<Button variant="primary" onClick={() => setConnecting(true)}>Connect a bot</Button>}
+        actions={
+          <>
+            {!!bots.data?.length && (
+              <Button onClick={() => refresh.mutate()} disabled={refresh.isPending} title="Re-check every bot with Telegram and recount audiences">
+                <RefreshCw size={15} className={cx(refresh.isPending && "animate-spin")} />
+                {refresh.isPending ? "Refreshing…" : "Refresh"}
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => setConnecting(true)}>Connect a bot</Button>
+          </>
+        }
       />
-      {bots.error && <Notice>{bots.error.message}</Notice>}
+      {(bots.error ?? refresh.error) && <div className="mb-4"><Notice>{(bots.error ?? refresh.error)!.message}</Notice></div>}
       {bots.isPending && <Skeleton className="h-48" />}
       {bots.data?.length === 0 && (
         <Panel className="px-6 py-12 text-center text-ink-soft">
@@ -26,14 +46,13 @@ export function BotsPage() {
       )}
       {!!bots.data?.length && (
         <Panel className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left">
+          <table className="w-full min-w-[520px] text-left">
             <thead className="border-b border-line text-sm text-ink-soft">
               <tr>
                 <th className="px-5 py-3 font-medium">Bot</th>
                 <th className="px-5 py-3 text-right font-medium">Active</th>
                 <th className="px-5 py-3 text-right font-medium">Blocked</th>
                 <th className="px-5 py-3 text-right font-medium">Unreachable</th>
-                <th className="px-5 py-3 font-medium">Source</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -49,7 +68,14 @@ export function BotsPage() {
                       </span>
                       <span>
                         <span className="block font-medium">{b.display_name}</span>
-                        <span className="block text-sm text-ink-faint">@{b.username}</span>
+                        <span className="block text-sm text-ink-faint">
+                          @{b.username}
+                          {!b.subscribers.connected ? (
+                            <> · database not connected</>
+                          ) : b.subscribers.source_error ? (
+                            <span className="text-status-error"> · database unreachable</span>
+                          ) : null}
+                        </span>
                       </span>
                     </Link>
                   </td>
@@ -57,17 +83,6 @@ export function BotsPage() {
                   <td className="px-5 py-3.5 text-right text-ink-soft">{fmt(b.subscribers.blocked)}</td>
                   <td className="px-5 py-3.5 text-right text-ink-soft">
                     {fmt(b.subscribers.unreachable)}
-                  </td>
-                  <td className="px-5 py-3.5 text-sm text-ink-soft">
-                    {b.subscribers.connected ? (
-                      b.subscribers.source_error ? (
-                        <span className="text-status-error">Database unreachable</span>
-                      ) : (
-                        "Database, live"
-                      )
-                    ) : (
-                      <span className="text-ink-faint">Database not connected</span>
-                    )}
                   </td>
                 </tr>
               ))}
