@@ -13,6 +13,7 @@ import { CampaignEditorPage } from "./features/campaigns/CampaignEditorPage";
 import { CampaignsPage } from "./features/campaigns/CampaignsPage";
 import { SharePage } from "./features/campaigns/SharePage";
 import { TestGroupsPage } from "./features/campaigns/TestGroupsPage";
+import { AnalyticsPage } from "./features/analytics/AnalyticsPage";
 import { OverviewPage } from "./features/overview/OverviewPage";
 
 const queryClient = new QueryClient({
@@ -54,6 +55,7 @@ function OperatorRoutes() {
         <Route path="broadcasts/test-groups" element={<TestGroupsPage />} />
         <Route path="broadcasts/:campaignId" element={<CampaignDetailPage />} />
         <Route path="broadcasts/:campaignId/edit" element={<CampaignEditorPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

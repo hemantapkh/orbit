@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Bot, LayoutGrid, LogOut, Megaphone } from "lucide-react";
+import { Bot, ChartColumn, LayoutGrid, LogOut, Megaphone } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import { ErrorBoundary } from "./errors";
@@ -13,6 +13,7 @@ const NAV = [
   { to: "/", label: "Overview", icon: LayoutGrid, end: true },
   { to: "/bots", label: "Bots", icon: Bot },
   { to: "/broadcasts", label: "Broadcasts", icon: Megaphone },
+  { to: "/analytics", label: "Analytics", icon: ChartColumn },
 ];
 
 export function Shell() {

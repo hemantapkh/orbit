@@ -307,3 +307,24 @@ export type PublicBroadcast = {
   media: { kind: Media["kind"]; filename: string; size_bytes: number } | null;
   progress: Progress;
 };
+
+// ---- analytics -----------------------------------------------------------------------
+
+export type AnalyticsRange = "7d" | "30d" | "90d" | "12m" | "all";
+export type AudienceAnalytics = {
+  period: { range: AnalyticsRange; unit: "day" | "week" | "month"; start: string; end: string; buckets: string[] };
+  bots: number[];
+  kpis: {
+    people: number;
+    subscriptions: number;
+    multi_bot_people: number;
+    new_people: number | null;
+    new_people_previous: number | null;
+    blocked: number;
+  };
+  growth: { points: { t: string; bot_id: number; count: number }[]; before_start: Record<string, number>; missing_joined_at: number[] };
+  overlap: { by_bot_count: Record<string, number>; pairs: { a: number; b: number; people: number }[]; per_bot: Record<string, number> };
+  languages: { items: { code: string; people: number }[]; unknown: number; missing_language: number[] };
+  blocked: { t: string; count: number }[];
+  errors: Record<string, string>;
+};
