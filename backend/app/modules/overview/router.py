@@ -12,7 +12,7 @@ from app.modules.bots.models import Bot
 from app.modules.campaigns import service as campaigns
 from app.modules.campaigns.models import Campaign
 from app.modules.campaigns.schemas import DeliveryStats
-from app.modules.subscribers.service import counts_by_bot, unique_active_people
+from app.modules.sources.service import counts_by_bot, unique_active_people
 
 router = APIRouter(prefix="/overview", tags=["overview"])
 
@@ -25,10 +25,9 @@ class BotLine(BaseModel):
     token_valid: bool
     active: int
     blocked: int
-    unsubscribed: int
     unreachable: int
     total: int
-    source: str
+    connected: bool
     source_error: str | None
 
 

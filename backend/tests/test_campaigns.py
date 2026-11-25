@@ -1,13 +1,14 @@
+import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from tests.conftest import connect_bot, drain, push
+from tests.conftest import attach_users, connect_bot, drain
 
 
 async def _setup(client, n_a=5, n_b=3):
     a = await connect_bot(client, 0)
     b = await connect_bot(client, 1)
-    await push(client, a["api_key"], range(100, 100 + n_a))
-    await push(client, b["api_key"], range(200, 200 + n_b))
+    a["db"] = await attach_users(client, a["id"], list(range(100, 100 + n_a)))
+    b["db"] = await attach_users(client, b["id"], list(range(200, 200 + n_b)))
     return a, b
 
 
@@ -137,7 +138,10 @@ async def test_new_subscribers_after_start_are_not_included(client, telegram_fak
     c = await _campaign(client, [a["id"]])
     await client.post(f"/campaigns/{c['id']}/launch", json={})
     await delivery_engine.tick()
-    await push(client, a["api_key"], [999])
+    con = sqlite3.connect(a["db"])
+    con.execute("INSERT INTO users (tg_id, active) VALUES (999, 1)")
+    con.commit()
+    con.close()
     await drain(delivery_engine)
     assert {m["chat_id"] for m in telegram_fake.sent} == {100, 101}
 

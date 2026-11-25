@@ -8,7 +8,6 @@ from app.core.db import Base, TimestampMixin, UTCDateTime, utcnow
 
 
 class SourceKind(StrEnum):
-    INTEGRATION = "integration"  # the bot pushes subscribers to the integration API
     DATABASE = "database"  # Orbit reads the bot's own database live
 
 
@@ -19,7 +18,7 @@ class SourceStatus(StrEnum):
 
 
 class BotSource(Base, TimestampMixin):
-    """Where a bot's subscriber list comes from. No row means the integration API."""
+    """A bot's database connection: where its subscriber list is read from."""
 
     __tablename__ = "bot_sources"
 
@@ -41,10 +40,8 @@ class BotSource(Base, TimestampMixin):
 
 
 class BotSuppression(Base):
-    """Chats a database-source bot must not message again (learned during delivery).
-
-    Integration bots record this on subscribers.status instead; we can't write to a bot's
-    own database, so the platform keeps the list."""
+    """Chats a bot must not message again (learned during delivery). We never write to a
+    bot's own database, so Orbit keeps this list."""
 
     __tablename__ = "bot_suppressions"
     __table_args__ = (UniqueConstraint("bot_id", "chat_id", name="uq_bot_suppressions_bot_chat"),)

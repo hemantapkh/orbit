@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.modules.subscribers.schemas import SubscriberCounts
+from app.modules.sources.schemas import SubscriberCounts
 
 
 class BotCreate(BaseModel):
@@ -24,12 +24,6 @@ class BotOut(BaseModel):
     description: str
     is_active: bool
     token_valid: bool
-    api_key_prefix: str
     last_checked_at: datetime | None
-    last_ingest_at: datetime | None
     created_at: datetime
     subscribers: SubscriberCounts
-
-
-class BotWithKey(BotOut):
-    api_key: str  # shown exactly once

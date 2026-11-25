@@ -23,7 +23,7 @@ from app.modules.campaigns.schemas import (
     TestSendOut,
 )
 from app.modules.media.models import MediaAsset
-from app.modules.subscribers.service import active_audience_size
+from app.modules.sources.service import active_audience_size
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 

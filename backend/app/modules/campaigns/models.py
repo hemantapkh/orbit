@@ -86,9 +86,6 @@ class Delivery(Base):
     id: Mapped[int] = mapped_column(BigId, primary_key=True)
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"))
     bot_id: Mapped[int] = mapped_column(ForeignKey("bots.id", ondelete="CASCADE"))
-    subscriber_id: Mapped[int | None] = mapped_column(
-        ForeignKey("subscribers.id", ondelete="SET NULL"), nullable=True
-    )
     chat_id: Mapped[int] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(16), default=DeliveryStatus.PENDING)
     attempts: Mapped[int] = mapped_column(Integer, default=0)

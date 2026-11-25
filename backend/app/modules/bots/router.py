@@ -3,7 +3,6 @@ from sqlalchemy import exists, select
 
 from app.core.db import utcnow
 from app.core.deps import SessionDep, TelegramDep
-from app.core.security import generate_api_key
 from app.integrations.telegram.bots import (
     BotIdentity,
     TelegramUnavailable,
@@ -16,10 +15,10 @@ from app.integrations.telegram.client import TelegramClient
 from app.modules.activity.service import record
 from app.modules.auth.deps import CurrentAdmin
 from app.modules.bots.models import Bot
-from app.modules.bots.schemas import BotCreate, BotOut, BotUpdate, BotWithKey
+from app.modules.bots.schemas import BotCreate, BotOut, BotUpdate
 from app.modules.campaigns.models import Delivery
-from app.modules.subscribers.schemas import SubscriberCounts
-from app.modules.subscribers.service import counts_by_bot
+from app.modules.sources.schemas import SubscriberCounts
+from app.modules.sources.service import counts_by_bot
 
 router = APIRouter(prefix="/bots", tags=["bots"])
 
@@ -33,9 +32,7 @@ def to_out(bot: Bot, counts: SubscriberCounts) -> BotOut:
         description=bot.description,
         is_active=bot.is_active,
         token_valid=bot.token_valid,
-        api_key_prefix=bot.api_key_prefix,
         last_checked_at=bot.last_checked_at,
-        last_ingest_at=bot.last_ingest_at,
         created_at=bot.created_at,
         subscribers=counts,
     )
@@ -64,22 +61,19 @@ async def list_bots(session: SessionDep, _: CurrentAdmin):
     return [to_out(b, counts[b.id]) for b in bots]
 
 
-@router.post("", response_model=BotWithKey, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=BotOut, status_code=status.HTTP_201_CREATED)
 async def connect_bot(
     body: BotCreate, session: SessionDep, telegram: TelegramDep, admin: CurrentAdmin
 ):
     me = await _identify(telegram, body.token)
     if await session.scalar(select(Bot.id).where(Bot.telegram_id == me.telegram_id)):
         raise HTTPException(status.HTTP_409_CONFLICT, f"@{me.username} is already connected")
-    key, key_hash, prefix = generate_api_key()
     bot = Bot(
         telegram_id=me.telegram_id,
         username=me.username,
         display_name=me.display_name,
         description=body.description,
         token_encrypted=seal_token(body.token),
-        api_key_hash=key_hash,
-        api_key_prefix=prefix,
         last_checked_at=utcnow(),
     )
     session.add(bot)
@@ -87,7 +81,7 @@ async def connect_bot(
     record(session, admin, "bot.connected", "bot", bot.id, username=bot.username)
     await session.commit()
     await session.refresh(bot)
-    return BotWithKey(**to_out(bot, SubscriberCounts()).model_dump(), api_key=key)
+    return to_out(bot, SubscriberCounts())
 
 
 @router.get("/{bot_id}", response_model=BotOut)
@@ -142,17 +136,6 @@ async def refresh_bot(bot_id: int, session: SessionDep, telegram: TelegramDep, _
     bot.last_checked_at = utcnow()
     await session.commit()
     return await get_bot(bot_id, session, _)
-
-
-@router.post("/{bot_id}/rotate-key", response_model=BotWithKey)
-async def rotate_key(bot_id: int, session: SessionDep, admin: CurrentAdmin):
-    bot = await _get_bot(session, bot_id)
-    key, key_hash, prefix = generate_api_key()
-    bot.api_key_hash, bot.api_key_prefix = key_hash, prefix
-    record(session, admin, "bot.key_rotated", "bot", bot.id)
-    await session.commit()
-    out = await get_bot(bot_id, session, admin)
-    return BotWithKey(**out.model_dump(), api_key=key)
 
 
 @router.delete("/{bot_id}", status_code=status.HTTP_204_NO_CONTENT)

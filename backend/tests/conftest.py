@@ -1,6 +1,8 @@
+import itertools
 import json
 import os
 import re
+import sqlite3
 import tempfile
 from collections import defaultdict
 from pathlib import Path
@@ -156,12 +158,43 @@ async def connect_bot(client, token_index=0) -> dict:
     return r.json()
 
 
-async def push(client, api_key: str, chat_ids, **extra) -> httpx.Response:
-    return await client.post(
-        "/integration/v1/subscribers",
-        headers={"Authorization": f"Bearer {api_key}"},
-        json={"subscribers": [{"chat_id": c, **extra} for c in chat_ids]},
+def make_user_db(path: Path, users) -> str:
+    """A tiny "bot database": users(tg_id, username, first_name, active).
+
+    `users` holds chat ids or (chat_id, username, first_name[, active]) tuples."""
+    con = sqlite3.connect(path)
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS users "
+        "(tg_id INTEGER, username TEXT, first_name TEXT, active INTEGER DEFAULT 1)"
     )
+    rows = [(u, None, None, 1) if isinstance(u, int) else (tuple(u) + (1,))[:4] for u in users]
+    con.executemany("INSERT INTO users VALUES (?, ?, ?, ?)", rows)
+    con.commit()
+    con.close()
+    return f"sqlite:///{path}"
+
+
+USERS_MAPPING = {
+    "chat_id": "tg_id",
+    "username": "username",
+    "first_name": "first_name",
+    "is_active": "active",
+}
+
+
+_db_counter = itertools.count()
+
+
+async def attach_users(client, bot_id: int, users) -> Path:
+    """Connect a fresh bot database holding `users` to the bot. Returns its file path."""
+    path = _tmp / f"bot{bot_id}-{next(_db_counter)}.sqlite"
+    url = make_user_db(path, users)
+    r = await client.put(
+        f"/bots/{bot_id}/source",
+        json={"database_url": url, "table": "users", "column_map": USERS_MAPPING},
+    )
+    assert r.status_code == 200, r.text
+    return path
 
 
 async def drain(engine: DeliveryEngine, max_ticks: int = 50) -> None:

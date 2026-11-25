@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import secrets
 from datetime import timedelta
 
 import jwt
@@ -12,7 +11,6 @@ from app.core.db import utcnow
 
 _password_hash = PasswordHash.recommended()
 _JWT_ALG = "HS256"
-API_KEY_PREFIX = "orb_"
 
 
 def hash_password(password: str) -> str:
@@ -48,13 +46,3 @@ def encrypt_secret(value: str) -> str:
 
 def decrypt_secret(value: str) -> str:
     return _fernet().decrypt(value.encode()).decode()
-
-
-def generate_api_key() -> tuple[str, str, str]:
-    """Return (plaintext key, sha256 hash, display prefix)."""
-    key = API_KEY_PREFIX + secrets.token_urlsafe(32)
-    return key, hash_api_key(key), key[: len(API_KEY_PREFIX) + 6]
-
-
-def hash_api_key(key: str) -> str:
-    return hashlib.sha256(key.encode()).hexdigest()

@@ -6,7 +6,6 @@ from app.modules.bots.models import Bot
 from app.modules.campaigns.models import Campaign, CampaignBot, Delivery, TestGroup
 from app.modules.media.models import MediaAsset, MediaBotFile
 from app.modules.sources.models import BotSource, BotSuppression
-from app.modules.subscribers.models import Subscriber
 
 __all__ = [
     "ActivityLog",
@@ -19,6 +18,5 @@ __all__ = [
     "Delivery",
     "MediaAsset",
     "MediaBotFile",
-    "Subscriber",
     "TestGroup",
 ]

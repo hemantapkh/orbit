@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.core.db import SessionLocal
 from app.modules.sources.models import BotSuppression
 from app.modules.sources.service import id_cache
-from tests.conftest import connect_bot, drain, push
+from tests.conftest import attach_users, connect_bot, drain
 
 USERS = [
     # id, tg_id, username, first_name, is_active, plan
@@ -158,7 +158,6 @@ async def test_preview(client, bot_db):
 
 async def test_save_and_counts_with_suppressions(client, bot_db):
     bot = await connect_bot(client)
-    await push(client, bot["api_key"], [1, 2, 3])  # ignored once the bot uses a database
     saved = await save_source(client, bot["id"], bot_db)
     assert saved["kind"] == "database" and saved["table"] == "users"
     assert saved["cached_count"] == 4 and saved["status"] == "healthy"
@@ -168,7 +167,7 @@ async def test_save_and_counts_with_suppressions(client, bot_db):
     assert got.json()["database"] == "botdb.sqlite"
 
     counts = (await client.get(f"/bots/{bot['id']}")).json()["subscribers"]
-    assert counts["active"] == 4 and counts["source"] == "database"
+    assert counts["active"] == 4 and counts["connected"] is True
 
     async with SessionLocal() as s:
         s.add(BotSuppression(bot_id=bot["id"], chat_id=5002, reason="blocked"))
@@ -192,17 +191,15 @@ async def test_save_and_counts_with_suppressions(client, bot_db):
     assert r.status_code == 200 and r.json()["cached_count"] == 3
 
     assert (await client.delete(f"/bots/{bot['id']}/source")).status_code == 204
-    assert (await client.get(f"/bots/{bot['id']}/source")).json()["kind"] == "integration"
-    assert (await client.get(f"/bots/{bot['id']}")).json()["subscribers"][
-        "active"
-    ] == 3  # pushed ones
+    assert (await client.get(f"/bots/{bot['id']}/source")).json()["kind"] == "none"
+    after = (await client.get(f"/bots/{bot['id']}")).json()["subscribers"]
+    assert after["active"] == 0 and after["connected"] is False
 
 
 async def test_campaign_from_external_database(client, bot_db, telegram_fake, delivery_engine):
     a = await connect_bot(client, 0)
     b = await connect_bot(client, 1)
-    await push(client, a["api_key"], [111])  # must not receive: bot A reads its database
-    await push(client, b["api_key"], [222, 223])
+    await attach_users(client, b["id"], [222, 223])
     await save_source(client, a["id"], bot_db)
     telegram_fake.blocked.add(5004)
     telegram_fake.missing.add(5006)
@@ -244,7 +241,7 @@ async def test_campaign_from_external_database(client, bot_db, telegram_fake, de
 async def test_source_error(client, bot_db, telegram_fake, delivery_engine):
     a = await connect_bot(client, 0)
     b = await connect_bot(client, 1)
-    await push(client, b["api_key"], [222])
+    await attach_users(client, b["id"], [222])
     await save_source(client, a["id"], bot_db)
 
     con = sqlite3.connect(bot_db)

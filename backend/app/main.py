@@ -18,7 +18,6 @@ from app.modules.bots.router import router as bots_router
 from app.modules.campaigns.engine import DeliveryEngine
 from app.modules.campaigns.router import router as campaigns_router
 from app.modules.campaigns.test_groups import router as test_groups_router
-from app.modules.integrations.router import router as integration_router
 from app.modules.media.router import router as media_router
 from app.modules.overview.router import router as overview_router
 from app.modules.sources.connection import engines as source_engines
@@ -34,7 +33,6 @@ ADMIN_ROUTERS = [
     media_router,
     activity_router,
 ]
-PUBLIC_ROUTERS = [integration_router]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -63,7 +61,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Orbit", version="0.1.0", lifespan=lifespan)
     api = APIRouter(prefix="/api")
-    for r in ADMIN_ROUTERS + PUBLIC_ROUTERS:
+    for r in ADMIN_ROUTERS:
         api.include_router(r)
 
     @api.get("/health", tags=["system"])

@@ -101,8 +101,8 @@ async def preview(body: PreviewIn, session: SessionDep, _: CurrentAdmin):
 
 
 def _out(source: BotSource | None) -> SourceOut:
-    if source is None or source.kind == SourceKind.INTEGRATION:
-        return SourceOut(kind="integration")
+    if source is None:
+        return SourceOut(kind="none")
     try:
         where = describe_url(service.url_of(source))
     except SourceError:
@@ -190,7 +190,7 @@ async def save_source(bot_id: int, body: SourceSaveIn, session: SessionDep, admi
 
 @router.delete("/bots/{bot_id}/source", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_source(bot_id: int, session: SessionDep, admin: CurrentAdmin):
-    """Switch the bot back to the integration API. Suppressions are kept."""
+    """Disconnect the bot's database. Suppressions are kept."""
     _, source = await _bot_and_source(session, bot_id)
     if source is not None:
         await engines.drop(source.id)

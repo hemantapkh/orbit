@@ -1,20 +1,16 @@
-from tests.conftest import connect_bot, drain, push
+from app.core.db import SessionLocal
+from app.modules.sources.models import BotSuppression
+from tests.conftest import attach_users, connect_bot, drain
 
 
 async def test_selected_people_resend_and_activity(client, telegram_fake, delivery_engine):
     a = await connect_bot(client, 0)
-    await client.post(
-        "/integration/v1/subscribers",
-        headers={"Authorization": f"Bearer {a['api_key']}"},
-        json={
-            "subscribers": [
-                {"chat_id": 11, "username": "ana", "first_name": "Ana"},
-                {"chat_id": 12, "username": "bob", "first_name": "Bob"},
-                {"chat_id": 13, "username": "anil", "first_name": "Anil", "status": "unsubscribed"},
-            ]
-        },
+    await attach_users(
+        client, a["id"], [(11, "ana", "Ana"), (12, "bob", "Bob"), (13, "anil", "Anil"), 14, 15]
     )
-    await push(client, a["api_key"], [14, 15])
+    async with SessionLocal() as s:  # anil blocked the bot earlier
+        s.add(BotSuppression(bot_id=a["id"], chat_id=13, reason="blocked"))
+        await s.commit()
 
     hits = (await client.get(f"/bots/{a['id']}/people", params={"q": "an"})).json()
     assert {(h["chat_id"], h["reachable"]) for h in hits} == {(11, True), (13, False)}
@@ -37,7 +33,7 @@ async def test_selected_people_resend_and_activity(client, telegram_fake, delive
     ).json()
     await client.post(f"/campaigns/{c['id']}/launch", json={})
     await drain(delivery_engine)
-    assert [m["chat_id"] for m in telegram_fake.sent] == [11]  # 13 opted out
+    assert [m["chat_id"] for m in telegram_fake.sent] == [11]  # 13 blocked the bot
 
     # resend to everyone: same message, linked to the original
     again = (await client.post(f"/campaigns/{c['id']}/duplicate")).json()
@@ -98,7 +94,7 @@ async def test_selected_people_must_belong_to_campaign_bots(client):
 
 async def test_delete_any_broadcast_except_while_sending(client, telegram_fake, delivery_engine):
     a = await connect_bot(client, 0)
-    await push(client, a["api_key"], [1, 2])
+    await attach_users(client, a["id"], [1, 2])
     first = (
         await client.post(
             "/campaigns", json={"name": "x", "bot_ids": [a["id"]], "message": {"text": "hi"}}

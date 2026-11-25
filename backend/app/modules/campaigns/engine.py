@@ -11,7 +11,7 @@ import logging
 import time
 from dataclasses import dataclass
 
-from sqlalchemy import exists, insert, literal, select, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
@@ -33,7 +33,6 @@ from app.modules.campaigns.schemas import Audience
 from app.modules.campaigns.service import skip_pending
 from app.modules.media.models import MediaAsset
 from app.modules.media.service import media_ref_for_bot, remember_file_id
-from app.modules.sources.models import BotSource, SourceKind
 from app.modules.sources.service import (
     database_sources,
     iter_audience,
@@ -41,7 +40,6 @@ from app.modules.sources.service import (
     suppress,
     suppressed_ids,
 )
-from app.modules.subscribers.models import Subscriber, SubscriberStatus
 
 log = logging.getLogger("orbit.engine")
 
@@ -70,13 +68,12 @@ class RateLimiter:
 class Outcome:
     delivery_id: int
     chat_id: int
-    subscriber_id: int | None
     status: DeliveryStatus
     attempts: int
     error: str | None = None
     message_id: int | None = None
     file_id: str | None = None
-    subscriber_status: SubscriberStatus | None = None
+    suppress_reason: str | None = None  # blocked | unreachable: don't message again
 
 
 class DeliveryEngine:
@@ -151,44 +148,14 @@ class DeliveryEngine:
                 if audience.mode == "selected":
                     await self._snapshot_selected(s, cid, audience)
                 else:
-                    await self._snapshot_audience(s, cid)
                     await self._snapshot_database_audiences(s, cid)
                 record(s, None, "campaign.started", "campaign", cid, audience=audience.mode)
                 await s.commit()
                 log.info("Campaign %s started", cid)
 
     @staticmethod
-    async def _snapshot_audience(s: AsyncSession, campaign_id: int) -> None:
-        audience = (
-            select(
-                literal(campaign_id),
-                Subscriber.bot_id,
-                Subscriber.id,
-                Subscriber.chat_id,
-                literal(DeliveryStatus.PENDING.value),
-                literal(0),
-            )
-            .join(CampaignBot, CampaignBot.bot_id == Subscriber.bot_id)
-            .join(Bot, Bot.id == Subscriber.bot_id)
-            .where(
-                CampaignBot.campaign_id == campaign_id,
-                Subscriber.status == SubscriberStatus.ACTIVE,
-                Bot.is_active.is_(True),
-                ~exists().where(
-                    BotSource.bot_id == Subscriber.bot_id, BotSource.kind == SourceKind.DATABASE
-                ),
-            )
-        )
-        await s.execute(
-            insert(Delivery).from_select(
-                ["campaign_id", "bot_id", "subscriber_id", "chat_id", "status", "attempts"],
-                audience,
-            )
-        )
-
-    @staticmethod
     async def _snapshot_selected(s: AsyncSession, campaign_id: int, audience: Audience) -> None:
-        """Hand-picked recipients. People who blocked the bot or opted out are still skipped."""
+        """Hand-picked recipients. People who blocked the bot are still skipped."""
         bot_ids = set(
             (
                 await s.scalars(
@@ -202,34 +169,20 @@ class DeliveryEngine:
         for r in audience.recipients:
             if r.bot_id in bot_ids and r.chat_id not in by_bot.setdefault(r.bot_id, []):
                 by_bot[r.bot_id].append(r.chat_id)
-        db_bots = await database_sources(s, list(by_bot))
         rows = []
         for bot_id, chat_ids in by_bot.items():
-            skip = await suppressed_ids(s, bot_id) if bot_id in db_bots else set()
-            known = {
-                sub.chat_id: sub
-                for sub in (
-                    await s.scalars(
-                        select(Subscriber).where(
-                            Subscriber.bot_id == bot_id, Subscriber.chat_id.in_(chat_ids)
-                        )
-                    )
-                ).all()
-            }
-            for cid in chat_ids:
-                sub = known.get(cid) if bot_id not in db_bots else None
-                if cid in skip or (sub and sub.status != SubscriberStatus.ACTIVE):
-                    continue
-                rows.append(
-                    {
-                        "campaign_id": campaign_id,
-                        "bot_id": bot_id,
-                        "subscriber_id": sub.id if sub else None,
-                        "chat_id": cid,
-                        "status": DeliveryStatus.PENDING,
-                        "attempts": 0,
-                    }
-                )
+            skip = await suppressed_ids(s, bot_id)
+            rows += [
+                {
+                    "campaign_id": campaign_id,
+                    "bot_id": bot_id,
+                    "chat_id": cid,
+                    "status": DeliveryStatus.PENDING,
+                    "attempts": 0,
+                }
+                for cid in chat_ids
+                if cid not in skip
+            ]
         if rows:
             await s.execute(insert(Delivery), rows)
 
@@ -276,7 +229,6 @@ class DeliveryEngine:
                         {
                             "campaign_id": campaign_id,
                             "bot_id": bot_id,
-                            "subscriber_id": None,
                             "chat_id": cid,
                             "status": DeliveryStatus.PENDING,
                             "attempts": 0,
@@ -323,7 +275,6 @@ class DeliveryEngine:
                 await self._abort(s, campaign_id, "attached media was deleted")
                 return False
 
-            db_bots = set(await database_sources(s, [b.id for b in bots]))
             batches: list[tuple[Bot, list[Delivery]]] = []
             for bot in bots:
                 rows = (
@@ -353,10 +304,7 @@ class DeliveryEngine:
             await s.commit()
 
         await asyncio.gather(
-            *(
-                self._send_batch(bot, rows, content, asset, suppress_list=bot.id in db_bots)
-                for bot, rows in batches
-            )
+            *(self._send_batch(bot, rows, content, asset) for bot, rows in batches)
         )
         return True
 
@@ -388,8 +336,6 @@ class DeliveryEngine:
         rows: list[Delivery],
         content: MessageContent,
         asset: MediaAsset | None,
-        *,
-        suppress_list: bool = False,
     ) -> None:
         token = unseal_token(bot.token_encrypted)
         queue = list(rows)
@@ -415,7 +361,7 @@ class DeliveryEngine:
                 return await self._deliver(token, bot.id, d, content, media)
 
         outcomes += await asyncio.gather(*(one(d) for d in queue))
-        await self._record(bot.id, outcomes, suppress_list=suppress_list)
+        await self._record(bot.id, outcomes)
 
     async def _deliver(
         self,
@@ -432,11 +378,9 @@ class DeliveryEngine:
             r = await deliver(self._tg, token, d.chat_id, content, media)
         except Exception as exc:  # never let one bad send kill the batch
             log.exception("Unexpected error delivering %s", d.id)
-            return Outcome(
-                d.id, d.chat_id, d.subscriber_id, DeliveryStatus.FAILED, attempts, repr(exc)[:500]
-            )
+            return Outcome(d.id, d.chat_id, DeliveryStatus.FAILED, attempts, repr(exc)[:500])
 
-        base = (d.id, d.chat_id, d.subscriber_id)
+        base = (d.id, d.chat_id)
         match r.status:
             case SendStatus.DELIVERED:
                 return Outcome(
@@ -456,7 +400,7 @@ class DeliveryEngine:
                     DeliveryStatus.BLOCKED,
                     attempts,
                     r.error,
-                    subscriber_status=SubscriberStatus.BLOCKED,
+                    suppress_reason="blocked",
                 )
             case SendStatus.RECIPIENT_UNREACHABLE:
                 return Outcome(
@@ -464,15 +408,13 @@ class DeliveryEngine:
                     DeliveryStatus.FAILED,
                     attempts,
                     r.error,
-                    subscriber_status=SubscriberStatus.UNREACHABLE,
+                    suppress_reason="unreachable",
                 )
             case SendStatus.TRANSIENT if attempts < self._s.delivery_max_attempts:
                 return Outcome(*base, DeliveryStatus.PENDING, attempts, r.error)
         return Outcome(*base, DeliveryStatus.FAILED, attempts, r.error)
 
-    async def _record(
-        self, bot_id: int, outcomes: list[Outcome], *, suppress_list: bool = False
-    ) -> None:
+    async def _record(self, bot_id: int, outcomes: list[Outcome]) -> None:
         if not outcomes:
             return
         now = utcnow()
@@ -491,22 +433,8 @@ class DeliveryEngine:
                     for o in outcomes
                 ],
             )
-            sub_updates = [
-                {"id": o.subscriber_id, "status": o.subscriber_status}
-                for o in outcomes
-                if o.subscriber_status and o.subscriber_id
-            ]
-            if sub_updates:
-                await s.execute(update(Subscriber), sub_updates)
-            if suppress_list:
-                # Database-source bots: we can't write to their database, so remember here.
-                await suppress(
-                    s,
-                    bot_id,
-                    [
-                        (o.chat_id, o.subscriber_status.value)
-                        for o in outcomes
-                        if o.subscriber_status
-                    ],
-                )
+            # We never write to a bot's database, so blocked chats are remembered here.
+            await suppress(
+                s, bot_id, [(o.chat_id, o.suppress_reason) for o in outcomes if o.suppress_reason]
+            )
             await s.commit()

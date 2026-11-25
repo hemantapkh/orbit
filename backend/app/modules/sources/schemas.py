@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 FilterOp = Literal["eq", "neq", "is_null", "not_null", "is_true", "is_false"]
 MAPPED_FIELDS = (
@@ -123,7 +123,7 @@ class PreviewOut(BaseModel):
 class SourceOut(BaseModel):
     model_config = ConfigDict(serialize_by_alias=True)
 
-    kind: Literal["integration", "database"]
+    kind: Literal["none", "database"]
     driver: str | None = None
     host: str | None = None
     database: str | None = None
@@ -137,3 +137,19 @@ class SourceOut(BaseModel):
     last_checked_at: datetime | None = None
     cached_count: int | None = None
     cached_count_at: datetime | None = None
+
+
+class SubscriberCounts(BaseModel):
+    """Who a bot can reach. Counted live from its database, minus suppressions."""
+
+    active: int = 0
+    blocked: int = 0  # blocked the bot (learned while sending)
+    unreachable: int = 0  # Telegram says the chat doesn't exist
+    connected: bool = False  # False: the bot has no database connected yet
+    # Set when the bot's database couldn't be read; `active` is then the last cached count.
+    source_error: str | None = None
+
+    @computed_field
+    @property
+    def total(self) -> int:
+        return self.active + self.blocked + self.unreachable

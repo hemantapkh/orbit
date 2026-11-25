@@ -22,8 +22,7 @@ from app.modules.sources.query import (
     search_query,
     stream_chat_ids,
 )
-from app.modules.sources.schemas import ColumnMap, PreviewOut, SourceSpec
-from app.modules.subscribers.schemas import SubscriberCounts
+from app.modules.sources.schemas import ColumnMap, PreviewOut, SourceSpec, SubscriberCounts
 
 log = logging.getLogger("orbit.sources")
 
@@ -240,7 +239,7 @@ async def database_counts(
             active=len(ids) if ids is not None else (source.cached_count or 0),
             blocked=by_reason[bot_id].get("blocked", 0),
             unreachable=by_reason[bot_id].get("unreachable", 0),
-            source="database",
+            connected=True,
             source_error=None if ids is not None else source.last_error,
         )
     return out
@@ -267,23 +266,19 @@ async def iter_audience(session: AsyncSession, source: BotSource) -> AsyncIterat
 
 
 async def search_people(session: AsyncSession, bot_id: int, q: str, limit: int = 20) -> list[dict]:
-    """Find a bot's users by Telegram ID, username or name, whichever source the bot uses."""
-    from sqlalchemy import String, cast, or_
-
-    from app.modules.subscribers.models import Subscriber, SubscriberStatus
-
+    """Find a bot's users by Telegram ID, username or name in its database."""
     source = (await database_sources(session, [bot_id])).get(bot_id)
-    if source is not None:
-        spec = spec_of(source)
-        async with (await engine_for(source)).connect() as conn:
-            src = await reflect(conn, spec)
-            rows = (await conn.execute(search_query(src, spec, q, limit))).mappings().all()
-        skip = await suppressed_ids(session, bot_id)
-        out = []
-        for r in rows:
-            cid = as_chat_id(r["chat_id"])
-            if cid is None:
-                continue
+    if source is None:
+        raise SourceError("Connect this bot's database to search its users")
+    spec = spec_of(source)
+    async with (await engine_for(source)).connect() as conn:
+        src = await reflect(conn, spec)
+        rows = (await conn.execute(search_query(src, spec, q, limit))).mappings().all()
+    skip = await suppressed_ids(session, bot_id)
+    out = []
+    for r in rows:
+        cid = as_chat_id(r["chat_id"])
+        if cid is not None:
             out.append(
                 {
                     "chat_id": cid,
@@ -293,32 +288,27 @@ async def search_people(session: AsyncSession, bot_id: int, q: str, limit: int =
                     "reachable": cid not in skip,
                 }
             )
-        return out
+    return out
 
-    term = q.strip().lstrip("@")
-    pattern = f"%{term.lower()}%"
-    conds = [
-        func.lower(Subscriber.username).like(pattern),
-        func.lower(Subscriber.first_name).like(pattern),
-        func.lower(Subscriber.last_name).like(pattern),
-    ]
-    if term.lstrip("-").isdigit():
-        conds.append(cast(Subscriber.chat_id, String) == term)
-    subs = (
-        await session.scalars(
-            select(Subscriber)
-            .where(Subscriber.bot_id == bot_id, or_(*conds))
-            .order_by(Subscriber.username, Subscriber.chat_id)
-            .limit(limit)
-        )
-    ).all()
-    return [
-        {
-            "chat_id": s.chat_id,
-            "username": s.username,
-            "first_name": s.first_name,
-            "last_name": s.last_name,
-            "reachable": s.status == SubscriberStatus.ACTIVE,
-        }
-        for s in subs
-    ]
+
+# ---- audience numbers used across Orbit ----------------------------------------------
+
+
+async def counts_by_bot(session: AsyncSession, bot_ids=None) -> dict[int, SubscriberCounts]:
+    """Subscriber counts per bot. Bots without a database connected get zeros."""
+    sources = await database_sources(session, list(bot_ids) if bot_ids is not None else None)
+    out: dict[int, SubscriberCounts] = defaultdict(SubscriberCounts)
+    out.update(await database_counts(session, sources))
+    return out
+
+
+async def active_audience_size(session: AsyncSession, bot_ids: list[int]) -> int:
+    if not bot_ids:
+        return 0
+    counts = await counts_by_bot(session, bot_ids)
+    return sum(counts[b].active for b in bot_ids)
+
+
+async def unique_active_people(session: AsyncSession) -> int:
+    """Distinct people across all bots (private chat_id == Telegram user id)."""
+    return len(await database_people(session))

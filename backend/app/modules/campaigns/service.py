@@ -20,7 +20,7 @@ from app.modules.campaigns.schemas import (
 )
 from app.modules.media.models import MediaAsset
 from app.modules.media.service import media_ref_for_bot, remember_file_id
-from app.modules.subscribers.service import counts_by_bot
+from app.modules.sources.service import counts_by_bot
 
 
 def _stats(counts: dict[str, int]) -> DeliveryStats:
