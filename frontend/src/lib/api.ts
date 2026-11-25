@@ -326,5 +326,32 @@ export type AudienceAnalytics = {
   overlap: { by_bot_count: Record<string, number>; pairs: { a: number; b: number; people: number }[]; per_bot: Record<string, number> };
   languages: { items: { code: string; people: number }[]; unknown: number; missing_language: number[] };
   blocked: { t: string; count: number }[];
+  broadcasts: { id: number; name: string; started: string; bucket: string }[];
   errors: Record<string, string>;
+};
+
+export type BroadcastPerformance = {
+  id: number;
+  name: string;
+  status: CampaignStatus;
+  started: string;
+  finished: string | null;
+  total: number;
+  sent: number;
+  blocked: number;
+  failed: number;
+  delivery_rate: number | null;
+  block_rate: number | null;
+  seconds: number | null;
+};
+export type BroadcastAnalytics = { period: AudienceAnalytics["period"]; items: BroadcastPerformance[] };
+export type ColumnChoice = { ref: string; table: string; name: string; type: string };
+export type Breakdown = {
+  bot_id: number;
+  column: string;
+  total: number;
+  items: { value: string; people: number }[];
+  other: number;
+  empty: number;
+  grouped_by_month: boolean;
 };

@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Chart } from "../../components/chart/Chart";
+import { axis, base, C, zoom } from "../../components/chart/theme";
 import type { CampaignStatus, DeliveryStats, ErrorGroup, Outcome, Progress, TimelinePoint } from "../../lib/api";
 import { clockTime, duration, fmt, pct, when } from "../../lib/format";
 import { cx, fieldClass, Panel } from "../../components/ui";
@@ -107,10 +109,10 @@ function Count({ label, value, swatch }: { label: string; value: number; swatch:
 // ---- insights: timeline + failure reasons, sharing one set of filters ------------------
 
 const OUTCOMES: { key: Outcome; label: string; color: string }[] = [
-  { key: "delivered", label: "Delivered", color: "var(--color-chart-delivered)" },
-  { key: "blocked", label: "Blocked", color: "var(--color-chart-blocked)" },
-  { key: "unreachable", label: "Unreachable", color: "var(--color-chart-unreachable)" },
-  { key: "failed", label: "Failed", color: "var(--color-chart-failed)" },
+  { key: "delivered", label: "Delivered", color: C.delivered },
+  { key: "blocked", label: "Blocked", color: C.blocked },
+  { key: "unreachable", label: "Unreachable", color: C.unreachable },
+  { key: "failed", label: "Failed", color: C.failed },
 ];
 // Reference categorical palette, fixed order. A bot keeps its colour whatever is filtered.
 export const BOT_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
@@ -141,7 +143,7 @@ export function ProgressInsights({ progress, bots }: { progress: Progress; bots:
           ...botOrder
             .filter((b) => botSlot.get(b.bot_id) !== OTHER && present.has(String(b.bot_id)))
             .map((b) => ({ key: String(b.bot_id), label: `@${b.username}`, color: BOT_COLORS[botSlot.get(b.bot_id)!] })),
-          ...(present.has(String(OTHER)) ? [{ key: String(OTHER), label: "Other bots", color: "var(--color-ink-faint)" }] : []),
+          ...(present.has(String(OTHER)) ? [{ key: String(OTHER), label: "Other bots", color: C.faint }] : []),
         ];
 
   const errors = progress.errors.filter(
@@ -209,7 +211,6 @@ function TimelineChart({
   series: Series[];
   seriesKey: (p: TimelinePoint) => string;
 }) {
-  const [hover, setHover] = useState<number | null>(null);
   const step = progress.bucket_seconds * 1000;
   const first = new Date(progress.start!).getTime();
   const last = new Date(progress.end!).getTime();
@@ -223,70 +224,46 @@ function TimelineChart({
     grid[i].set(k, (grid[i].get(k) ?? 0) + p.count);
   }
   const totals = grid.map((g) => [...g.values()].reduce((a, b) => a + b, 0));
-  const max = Math.max(1, ...totals);
-  const slice = duration(progress.bucket_seconds);
   const all = totals.reduce((a, b) => a + b, 0);
+  const slice = duration(progress.bucket_seconds);
+  const labels = slots.map((t) => clockTime(new Date(t)));
+
+  const option = useMemo(
+    () => ({
+      ...base,
+      legend: { ...base.legend, data: series.map((s) => s.label) },
+      tooltip: { ...base.tooltip, trigger: "axis", axisPointer: { type: "shadow" } },
+      grid: { left: 8, right: 8, top: 36, bottom: slots.length > 30 ? 36 : 8, containLabel: true },
+      xAxis: { ...axis, type: "category", data: labels, splitLine: { show: false } },
+      yAxis: { ...axis, type: "value", minInterval: 1 },
+      dataZoom: zoom(slots.length > 30),
+      series: series.map((s, j) => ({
+        name: s.label,
+        type: "bar",
+        stack: "total",
+        barMaxWidth: 28,
+        // 2px surface gap between stacked segments; rounded data-end on the top segment
+        itemStyle: { color: s.color, borderColor: C.surface, borderWidth: 1, borderRadius: j === series.length - 1 ? [4, 4, 0, 0] : 0 },
+        emphasis: { focus: "series" },
+        data: grid.map((g) => g.get(s.key) ?? 0),
+      })),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(series), JSON.stringify(grid.map((g) => [...g])), labels.join()],
+  );
 
   return (
     <Panel className="px-5 pt-4 pb-3">
-      <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-soft">
-        {series.map((s) => (
-          <span key={s.key} className="inline-flex items-center gap-1.5">
-            <span className="size-2.5 rounded-sm" style={{ background: s.color }} />
-            {s.label}
-          </span>
-        ))}
-        <span className="text-ink-faint">per {slice}</span>
-      </div>
       {all === 0 ? (
         <p className="py-10 text-center text-sm text-ink-soft">Nothing matches these filters.</p>
       ) : (
         <>
-          <div className="relative">
-            <span className="absolute -top-1 left-0 text-[11px] text-ink-faint">{fmt(max)}</span>
-            <div
-              className="flex h-44 items-end gap-[2px] border-b border-line pt-4"
-              role="img"
-              aria-label={`Messages per ${slice}: ${series.map((s) => `${s.label} ${fmt(grid.reduce((n, g) => n + (g.get(s.key) ?? 0), 0))}`).join(", ")}. A table version follows.`}
-              onMouseLeave={() => setHover(null)}
-            >
-              {grid.map((g, i) => (
-                <div key={slots[i]} className="flex h-full min-w-[3px] flex-1 flex-col justify-end" onMouseEnter={() => setHover(i)}>
-                  {totals[i] > 0 && (
-                    <div className={cx("flex flex-col-reverse gap-[2px]", hover === i ? "opacity-100" : "opacity-90")} style={{ height: `${(totals[i] / max) * 100}%` }}>
-                      {series
-                        .filter((s) => (g.get(s.key) ?? 0) > 0)
-                        .map((s, j, shown) => (
-                          <div
-                            key={s.key}
-                            className={cx(j === shown.length - 1 && "rounded-t-[4px]")}
-                            style={{ flexGrow: g.get(s.key), minHeight: 2, background: s.color }}
-                          />
-                        ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {hover != null && totals[hover] > 0 && (
-              <div className="pointer-events-none absolute top-0 right-0 min-w-[150px] rounded-lg border border-line bg-surface px-3 py-2 text-xs shadow-[0_8px_24px_-12px_rgba(19,26,24,0.35)]">
-                <p className="mb-1 font-medium">{clockTime(new Date(slots[hover]))}</p>
-                {series.map((s) => (
-                  <p key={s.key} className="flex justify-between gap-4 text-ink-soft">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="size-2 rounded-sm" style={{ background: s.color }} />
-                      {s.label}
-                    </span>
-                    <span className="text-ink">{fmt(grid[hover].get(s.key) ?? 0)}</span>
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="mt-1.5 flex justify-between text-[11px] text-ink-faint">
-            <span>{clockTime(new Date(first))}</span>
-            <span>{clockTime(new Date(last))}</span>
-          </div>
+          <Chart
+            option={option}
+            height={260}
+            label={`Messages per ${slice}: ${series.map((s) => `${s.label} ${fmt(grid.reduce((n, g) => n + (g.get(s.key) ?? 0), 0))}`).join(", ")}. A table version follows.`}
+          />
+          <p className="mt-1 text-xs text-ink-faint">Per {slice}. Scroll or drag on the chart to zoom; click a legend item to hide it.</p>
           <details className="mt-2 text-sm">
             <summary className="cursor-pointer text-ink-soft hover:text-ink">Show as table</summary>
             <div className="overflow-x-auto">
@@ -303,7 +280,7 @@ function TimelineChart({
                   {grid.map((g, i) =>
                     totals[i] ? (
                       <tr key={slots[i]} className="border-t border-line">
-                        <td className="py-1">{clockTime(new Date(slots[i]))}</td>
+                        <td className="py-1">{labels[i]}</td>
                         {series.map((s) => (
                           <td key={s.key} className="py-1 text-right">{fmt(g.get(s.key) ?? 0)}</td>
                         ))}

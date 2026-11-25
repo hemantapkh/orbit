@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router";
 import "./index.css";
@@ -13,8 +13,10 @@ import { CampaignEditorPage } from "./features/campaigns/CampaignEditorPage";
 import { CampaignsPage } from "./features/campaigns/CampaignsPage";
 import { SharePage } from "./features/campaigns/SharePage";
 import { TestGroupsPage } from "./features/campaigns/TestGroupsPage";
-import { AnalyticsPage } from "./features/analytics/AnalyticsPage";
 import { OverviewPage } from "./features/overview/OverviewPage";
+
+// Charts are heavy; load analytics only when someone opens it.
+const AnalyticsPage = lazy(() => import("./features/analytics/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: true } },
@@ -55,7 +57,14 @@ function OperatorRoutes() {
         <Route path="broadcasts/test-groups" element={<TestGroupsPage />} />
         <Route path="broadcasts/:campaignId" element={<CampaignDetailPage />} />
         <Route path="broadcasts/:campaignId/edit" element={<CampaignEditorPage />} />
-        <Route path="analytics" element={<AnalyticsPage />} />
+        <Route
+          path="analytics"
+          element={
+            <Suspense fallback={<div className="h-96 animate-pulse rounded-xl bg-line/50" />}>
+              <AnalyticsPage />
+            </Suspense>
+          }
+        />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
