@@ -10,6 +10,7 @@ import {
   emptyMessage,
   type Media,
   type MessageContent,
+  type ParseMode,
 } from "../../lib/api";
 import { fmt, toLocalInput, when } from "../../lib/format";
 import { Button, cx, Dialog, fieldClass, Field, Input, Notice, PageHeader, Panel, Skeleton, Textarea } from "../../components/ui";
@@ -202,17 +203,18 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
 
           <Section title="Message">
             <MediaPicker media={media.data ?? null} onChange={(m) => patch({ media_id: m?.id ?? null })} />
-            <Composer value={message.text} onChange={(text) => patch({ text })} html={message.parse_mode === "HTML"} />
+            <Composer value={message.text} onChange={(text) => patch({ text })} mode={message.parse_mode} />
             <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm">
               <label className="flex items-center gap-2 text-ink-soft">
                 Formatting
                 <select
                   className={`${fieldClass} h-9 w-auto`}
                   value={message.parse_mode ?? "none"}
-                  onChange={(e) => patch({ parse_mode: e.target.value === "none" ? null : (e.target.value as "HTML") })}
+                  onChange={(e) => patch({ parse_mode: e.target.value === "none" ? null : (e.target.value as ParseMode) })}
                 >
+                  <option value="Markdown">Markdown</option>
                   <option value="HTML">HTML</option>
-                  <option value="MarkdownV2">MarkdownV2</option>
+                  <option value="MarkdownV2">Telegram MarkdownV2</option>
                   <option value="none">Plain text</option>
                 </select>
               </label>
@@ -290,7 +292,7 @@ function Section({ title, aside, children }: { title: string; aside?: ReactNode;
   );
 }
 
-function Composer({ value, onChange, html }: { value: string; onChange: (v: string) => void; html: boolean }) {
+function Composer({ value, onChange, mode }: { value: string; onChange: (v: string) => void; mode: ParseMode }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
   function wrap(open: string, close: string) {
@@ -307,17 +309,32 @@ function Composer({ value, onChange, html }: { value: string; onChange: (v: stri
 
   function link() {
     const url = prompt("Link address", "https://");
-    if (url && /^(https?|tg):\/\//.test(url)) wrap(`<a href="${url.replace(/"/g, "&quot;")}">`, "</a>");
+    if (!url || !/^(https?|tg):\/\//.test(url)) return;
+    if (mode === "Markdown") wrap("[", `](${url})`);
+    else wrap(`<a href="${url.replace(/"/g, "&quot;")}">`, "</a>");
   }
 
-  const tools: [typeof Bold, string, () => void][] = [
-    [Bold, "Bold", () => wrap("<b>", "</b>")],
-    [Italic, "Italic", () => wrap("<i>", "</i>")],
-    [Underline, "Underline", () => wrap("<u>", "</u>")],
-    [Strikethrough, "Strikethrough", () => wrap("<s>", "</s>")],
-    [Code, "Code", () => wrap("<code>", "</code>")],
-    [Link2, "Link", link],
-  ];
+  type Tool = [typeof Bold, string, () => void];
+  const tools: Tool[] =
+    mode === "Markdown"
+      ? [
+          [Bold, "Bold", () => wrap("**", "**")],
+          [Italic, "Italic", () => wrap("_", "_")],
+          [Strikethrough, "Strikethrough", () => wrap("~~", "~~")],
+          [Code, "Code", () => wrap("`", "`")],
+          [Link2, "Link", link],
+        ]
+      : mode === "HTML"
+        ? [
+            [Bold, "Bold", () => wrap("<b>", "</b>")],
+            [Italic, "Italic", () => wrap("<i>", "</i>")],
+            [Underline, "Underline", () => wrap("<u>", "</u>")],
+            [Strikethrough, "Strikethrough", () => wrap("<s>", "</s>")],
+            [Code, "Code", () => wrap("<code>", "</code>")],
+            [Link2, "Link", link],
+          ]
+        : [];
+  const html = tools.length > 0;
 
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-surface shadow-[0_1px_2px_rgba(23,33,30,0.04)] transition-[border-color,box-shadow] focus-within:border-accent focus-within:shadow-[0_0_0_4px_rgba(184,145,58,0.16)]">

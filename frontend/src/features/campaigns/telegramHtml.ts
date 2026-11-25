@@ -1,3 +1,6 @@
+import { marked } from "marked";
+import type { ParseMode } from "../../lib/api";
+
 /** Render Telegram's HTML subset safely for previews. Anything else becomes text. */
 const ALLOWED: Record<string, string> = {
   b: "strong", strong: "strong", i: "em", em: "em", u: "u", ins: "u",
@@ -5,9 +8,12 @@ const ALLOWED: Record<string, string> = {
   blockquote: "blockquote", "tg-spoiler": "span", span: "span",
 };
 
-export function renderTelegramHtml(source: string, parseMode: "HTML" | "MarkdownV2" | null): DocumentFragment {
+export function renderTelegramHtml(source: string, parseMode: ParseMode): DocumentFragment {
   const out = document.createDocumentFragment();
-  if (parseMode !== "HTML") {
+  // Standard Markdown is parsed by `marked`; the walk below keeps what Telegram can show,
+  // matching what the backend's telegramify-markdown sends.
+  if (parseMode === "Markdown") source = marked.parse(source, { async: false, gfm: true, breaks: true });
+  else if (parseMode !== "HTML") {
     out.append(document.createTextNode(source));
     return out;
   }
@@ -17,9 +23,25 @@ export function renderTelegramHtml(source: string, parseMode: "HTML" | "Markdown
       if (child.nodeType === Node.TEXT_NODE) {
         parent.appendChild(document.createTextNode(child.textContent ?? ""));
       } else if (child instanceof Element) {
-        const tag = ALLOWED[child.tagName.toLowerCase()];
+        const name = child.tagName.toLowerCase();
+        if (name === "br") {
+          parent.appendChild(document.createTextNode("\n"));
+          continue;
+        }
+        if (/^h[1-6]$/.test(name)) {
+          const strong = document.createElement("strong");
+          const u = document.createElement("u");
+          walk(child, u);
+          strong.appendChild(u);
+          parent.appendChild(strong);
+          parent.appendChild(document.createTextNode("\n"));
+          continue;
+        }
+        if (name === "li") parent.appendChild(document.createTextNode("⦁ "));
+        const tag = ALLOWED[name];
         if (!tag) {
           walk(child, parent);
+          if (name === "p" || name === "li") parent.appendChild(document.createTextNode("\n"));
           continue;
         }
         const el = document.createElement(tag);
@@ -38,5 +60,9 @@ export function renderTelegramHtml(source: string, parseMode: "HTML" | "Markdown
     }
   };
   walk(doc.body, out);
+  // Drop the trailing line breaks block elements leave behind.
+  while (out.lastChild?.nodeType === Node.TEXT_NODE && !out.lastChild.textContent?.trim()) out.lastChild.remove();
+  const last = out.lastChild;
+  if (last?.nodeType === Node.TEXT_NODE) last.textContent = last.textContent!.replace(/\s+$/, "");
   return out;
 }

@@ -64,9 +64,11 @@ export type BotWithKey = Bot & { api_key: string };
 
 export type MessageButton = { text: string; url: string };
 
+export type ParseMode = "Markdown" | "HTML" | "MarkdownV2" | null;
+
 export type MessageContent = {
   text: string;
-  parse_mode: "HTML" | "MarkdownV2" | null;
+  parse_mode: ParseMode;
   media_id: number | null;
   buttons: MessageButton[];
   disable_link_preview: boolean;
@@ -189,7 +191,7 @@ export type Overview = {
 
 export const emptyMessage = (): MessageContent => ({
   text: "",
-  parse_mode: "HTML",
+  parse_mode: "Markdown",
   media_id: null,
   buttons: [],
   disable_link_preview: false,
