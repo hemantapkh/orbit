@@ -18,7 +18,6 @@ const NAV = [
 ];
 
 export function Shell() {
-  const me = useMe();
   const mainRef = useRef<HTMLElement>(null);
   const { pathname } = useLocation();
   // Each page starts at the top (main keeps its own scroll position otherwise).
