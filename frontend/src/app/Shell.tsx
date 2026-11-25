@@ -1,12 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Bot, ChartColumn, LayoutGrid, LogOut, Megaphone } from "lucide-react";
-import { useEffect, useRef } from "react";
-import { NavLink, Outlet, useLocation } from "react-router";
+import { Bot, Building2, ChartColumn, Check, ChevronsUpDown, LayoutGrid, LogOut, Megaphone, Plus, Settings } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "./errors";
 import { api } from "../lib/api";
 import { cx } from "../components/ui";
 import { OrbitLogo } from "../components/brand";
-import { useMe } from "./auth";
+import { useMe, useOrg } from "./auth";
+import { setOrgId } from "../lib/org";
 
 /** Modules register here as they ship. Only real, working sections appear. */
 const NAV = [
@@ -14,6 +15,7 @@ const NAV = [
   { to: "/bots", label: "Bots", icon: Bot },
   { to: "/broadcasts", label: "Broadcasts", icon: Megaphone },
   { to: "/analytics", label: "Analytics", icon: ChartColumn },
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Shell() {
@@ -38,9 +40,10 @@ export function Shell() {
     // bars inside main can't drift. Phones keep normal page scrolling.
     <div className="min-h-screen md:grid md:h-dvh md:grid-cols-[232px_minmax(0,1fr)] md:overflow-hidden">
       <aside className="bg-panel text-panel-ink md:flex md:h-dvh md:flex-col md:overflow-y-auto md:overscroll-none">
-        <div className="flex items-center justify-between px-5 py-4 md:py-6">
+        <div className="flex items-center justify-between px-5 pt-4 pb-2 md:pt-6">
           <OrbitLogo tone="inverse" size={26} />
         </div>
+        <OrgSwitcher />
         <nav aria-label="Main" className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:pb-0">
           {NAV.map(({ to, label, icon: Icon, end }) => (
             <NavLink
@@ -80,6 +83,80 @@ export function Shell() {
           </ErrorBoundary>
         </div>
       </main>
+    </div>
+  );
+}
+
+const ROLE_LABEL = { owner: "Owner", admin: "Admin", sender: "Sender", viewer: "Viewer" } as const;
+
+/** Which organization you're working in. Switching reloads everything for that org. */
+function OrgSwitcher() {
+  const { org, orgs } = useOrg();
+  const [open, setOpen] = useState(false);
+  const qc = useQueryClient();
+  const nav = useNavigate();
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  if (!org) return null;
+
+  const switchTo = (id: number) => {
+    setOpen(false);
+    if (id === org.id) return;
+    setOrgId(id);
+    qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
+    nav("/");
+  };
+
+  return (
+    <div ref={ref} className="relative px-3 pb-3">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2.5 rounded-lg bg-white/[0.06] px-3 py-2 text-left ring-1 ring-white/10 hover:bg-white/[0.1]"
+      >
+        <Building2 size={16} className="shrink-0 text-panel-muted" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-white">{org.name}</span>
+          <span className="block text-xs text-panel-muted">{ROLE_LABEL[org.role]}</span>
+        </span>
+        <ChevronsUpDown size={14} className="shrink-0 text-panel-muted" />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-3 left-3 z-30 mt-1.5 overflow-hidden rounded-lg border border-line bg-surface py-1 text-sm text-ink shadow-[0_16px_40px_-16px_rgba(19,26,24,0.45)]">
+          <p className="px-3 pt-1.5 pb-1 text-xs text-ink-faint">Organizations</p>
+          {orgs.map((o) => (
+            <button key={o.id} role="menuitem" type="button" onClick={() => switchTo(o.id)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-canvas">
+              <span className="min-w-0 flex-1 truncate">{o.name}</span>
+              <span className="text-xs text-ink-faint">{ROLE_LABEL[o.role]}</span>
+              <Check size={14} className={o.id === org.id ? "text-panel" : "invisible"} />
+            </button>
+          ))}
+          <div className="my-1 border-t border-line" />
+          <button
+            role="menuitem"
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              nav("/settings?new=org");
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-ink-soft hover:bg-canvas hover:text-ink"
+          >
+            <Plus size={14} /> New organization
+          </button>
+        </div>
+      )}
     </div>
   );
 }

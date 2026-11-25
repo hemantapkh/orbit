@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
+import { useOrg } from "../../app/auth";
 import { BotAvatar } from "../../components/BotAvatar";
 import { api, type Overview } from "../../lib/api";
 import { ago, fmt, pct } from "../../lib/format";
 import { buttonClass, CampaignStatusTag, StatusDot, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
 
 export function OverviewPage() {
+  const { can } = useOrg();
   const q = useQuery({
     queryKey: ["overview"],
     queryFn: () => api<Overview>("/overview"),
@@ -17,7 +19,7 @@ export function OverviewPage() {
       <PageHeader
         title="Overview"
         actions={
-          <Link to={"/broadcasts/new"} className={buttonClass("primary")}>New broadcast</Link>
+          can("sender") ? <Link to={"/broadcasts/new"} className={buttonClass("primary")}>New broadcast</Link> : undefined
         }
       />
       {q.error && <Notice>{q.error.message}</Notice>}

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { useOrg } from "../../app/auth";
 import { api, type Bot } from "../../lib/api";
 import { ago, fmt, when } from "../../lib/format";
 import { Button, cx, Dialog, Field, Input, Notice, Panel, Skeleton } from "../../components/ui";
@@ -16,6 +17,7 @@ export function BotDetailPage() {
   const nav = useNavigate();
   const key = ["bots", botId];
   const bot = useQuery({ queryKey: key, queryFn: () => api<Bot>(`/bots/${botId}`) });
+  const { can } = useOrg();
   const [tokenOpen, setTokenOpen] = useState(false);
 
   const done = (b: Bot) => {
@@ -73,10 +75,10 @@ export function BotDetailPage() {
           </p>
           {b.about && <p className="mt-2 max-w-[64ch] text-ink-soft">{b.about}</p>}
         </div>
-        <Button onClick={() => refresh.mutate()} disabled={refresh.isPending} title="Re-check with Telegram and recount the audience" className="self-start">
+        {can("sender") && <Button onClick={() => refresh.mutate()} disabled={refresh.isPending} title="Re-check with Telegram and recount the audience" className="self-start">
           <RefreshCw size={15} className={cx(refresh.isPending && "animate-spin")} />
           {refresh.isPending ? "Refreshing…" : "Refresh"}
-        </Button>
+        </Button>}
       </header>
 
       <div className="space-y-8">
@@ -131,7 +133,7 @@ export function BotDetailPage() {
           </Panel>
         </section>
 
-        <section aria-labelledby="settings">
+        {can("admin") && <section aria-labelledby="settings">
           <h2 id="settings" className="mb-3 text-lg font-semibold">Settings</h2>
           <Panel className="divide-y divide-line">
             <Setting
@@ -159,6 +161,8 @@ export function BotDetailPage() {
             </Setting>
           </Panel>
         </section>
+
+        }
 
         <ActivityList entityType="bot" entityId={b.id} initial={5} />
       </div>

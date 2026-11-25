@@ -1,3 +1,5 @@
+import { getOrgId } from "./org";
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -18,10 +20,15 @@ function describe(detail: unknown): string {
 
 export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   const { json, headers, ...rest } = init;
+  const org = getOrgId();
   const res = await fetch(`/api${path}`, {
     credentials: "same-origin",
     ...rest,
-    headers: json !== undefined ? { "Content-Type": "application/json", ...headers } : headers,
+    headers: {
+      ...(json !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(org ? { "X-Org-Id": String(org) } : {}),
+      ...(headers as Record<string, string> | undefined),
+    },
     body: json !== undefined ? JSON.stringify(json) : rest.body,
   });
   if (res.status === 204) return undefined as T;
@@ -32,7 +39,8 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
 
 // ---- types mirrored from the FastAPI schemas -------------------------------------
 
-export type Admin = { id: number; email: string; name: string };
+export type OrgMembership = { id: number; name: string; role: "viewer" | "sender" | "admin" | "owner" };
+export type Admin = { id: number; email: string; name: string; orgs: OrgMembership[] };
 
 export type SubscriberCounts = {
   active: number;
@@ -361,3 +369,9 @@ export type Breakdown = {
   empty: number;
   grouped_by_month: boolean;
 };
+
+// ---- organizations --------------------------------------------------------------------
+
+export type OrgMember = { user_id: number; email: string; name: string; role: OrgMembership["role"]; joined_at: string };
+export type OrgInvite = { id: number; email: string; role: OrgMembership["role"]; expires_at: string; token: string | null };
+export type InvitePreview = { org_name: string; email: string; role: OrgMembership["role"]; expires_at: string; has_account: boolean };

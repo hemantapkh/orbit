@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Pencil, Share2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { useOrg } from "../../app/auth";
 import { api, type CampaignDetail, type Delivery, type Media, type Page, type Progress, type RelatedSend } from "../../lib/api";
 import { fmt, when } from "../../lib/format";
 import { Button, buttonClass, CampaignStatusTag, cx, Dialog, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
@@ -57,6 +58,7 @@ export function CampaignDetailPage() {
   });
 
   const [sharing, setSharing] = useState(false);
+  const { can } = useOrg();
 
   if (q.isPending) return <Skeleton className="h-96" />;
   if (q.error) return <Notice>{q.error.message}</Notice>;
@@ -106,7 +108,7 @@ export function CampaignDetailPage() {
         <ArrowLeft size={15} /> Broadcasts
       </Link>
       <PageHeader
-        title={<EditableTitle campaignId={c.id} name={c.name} onSaved={(d) => qc.setQueryData(key, d)} />}
+        title={can("sender") ? <EditableTitle campaignId={c.id} name={c.name} onSaved={(d) => qc.setQueryData(key, d)} /> : c.name}
         lede={
           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <CampaignStatusTag status={c.status} />
@@ -122,7 +124,7 @@ export function CampaignDetailPage() {
             )}
           </span>
         }
-        actions={actions}
+        actions={can("sender") ? actions : undefined}
       />
       {(act.error ?? remove.error) && <div className="mb-6"><Notice>{(act.error ?? remove.error)!.message}</Notice></div>}
 

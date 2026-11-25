@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { type Admin, api, ApiError } from "../lib/api";
+import { atLeast, getOrgId, type Role, setOrgId } from "../lib/org";
 import { OrbitLoading, OrbitLogo, OrbitMark } from "../components/brand";
 import { Button, Field, Input, Notice } from "../components/ui";
 
@@ -13,12 +14,59 @@ export function useMe() {
   });
 }
 
+/** The organization you're working in, and your role there. */
+export function useOrg() {
+  const me = useMe();
+  const orgs = me.data?.orgs ?? [];
+  const current = orgs.find((o) => o.id === getOrgId()) ?? orgs[0] ?? null;
+  return {
+    org: current,
+    orgs,
+    role: current?.role,
+    can: (min: Role) => atLeast(current?.role, min),
+  };
+}
+
 export function RequireOperator({ children }: { children: ReactNode }) {
   const me = useMe();
   if (me.isPending) return <OrbitLoading />;
   if (me.error instanceof ApiError && me.error.status === 401) return <SignIn />;
   if (me.error) return <ServiceDown message={me.error.message} />;
+  const orgs = me.data.orgs;
+  if (!orgs.length) return <NoOrganization />;
+  // Keep the remembered organization only if you're still a member of it.
+  if (!orgs.some((o) => o.id === getOrgId())) setOrgId(orgs[0].id);
   return <>{children}</>;
+}
+
+function NoOrganization() {
+  const qc = useQueryClient();
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  async function create(e: FormEvent) {
+    e.preventDefault();
+    try {
+      const org = await api<{ id: number }>("/orgs", { method: "POST", json: { name } });
+      setOrgId(org.id);
+      await qc.invalidateQueries({ queryKey: ["me"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't create it");
+    }
+  }
+  return (
+    <div className="grid min-h-screen place-items-center bg-canvas px-4">
+      <form onSubmit={create} className="w-full max-w-sm space-y-5">
+        <OrbitLogo />
+        <h1 className="text-xl font-semibold">You're not in an organization yet</h1>
+        <p className="text-ink-soft">Ask someone to invite you, or start your own.</p>
+        {error && <Notice>{error}</Notice>}
+        <Field label="Organization name" htmlFor="orgname">
+          <Input id="orgname" required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Button type="submit" variant="primary" className="w-full">Create organization</Button>
+      </form>
+    </div>
+  );
 }
 
 function SignIn() {

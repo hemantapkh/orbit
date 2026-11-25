@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Trash2, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { Link } from "react-router";
+import { useOrg } from "../../app/auth";
 import { api, type Bot, type TestGroup, type TestMember } from "../../lib/api";
 import { Button, cx, Field, fieldClass, Input, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
 import { PeoplePicker } from "./PeoplePicker";
@@ -12,6 +13,8 @@ export function TestGroupsPage() {
   const groups = useQuery({ queryKey: ["test-groups"], queryFn: () => api<TestGroup[]>("/test-groups") });
   const bots = useQuery({ queryKey: ["bots"], queryFn: () => api<Bot[]>("/bots") });
   const [selected, setSelected] = useState<number | "new" | null>(null);
+  const { can } = useOrg();
+  if (!can("sender")) return <Notice>Test groups are managed by senders and admins.</Notice>;
 
   const current = selected === "new" ? null : groups.data?.find((g) => g.id === (selected ?? groups.data?.[0]?.id));
   const editing = selected === "new" || current;

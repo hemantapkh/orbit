@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSearchParams } from "react-router";
+import { useOrg } from "../../app/auth";
 import { api, type Bot, type BotSourceInfo, type ConnectionInfo } from "../../lib/api";
 import { ago } from "../../lib/format";
 import { Button, Field, Input, Notice, Skeleton, StatusDot } from "../../components/ui";
@@ -14,7 +15,9 @@ export function SourcePanel({ bot }: { bot: Bot }) {
   const [params, setParams] = useSearchParams();
   const key = ["bots", String(bot.id), "source"];
   const source = useQuery({ queryKey: key, queryFn: () => api<BotSourceInfo>(`/bots/${bot.id}/source`) });
-  const [mode, setMode] = useState<Mode>(params.get("connect") === "database" ? "setup" : "view");
+  const { can } = useOrg();
+  const manage = can("admin");
+  const [mode, setMode] = useState<Mode>(params.get("connect") === "database" && manage ? "setup" : "view");
 
   const refreshAll = () => {
     qc.invalidateQueries({ queryKey: key });
@@ -53,6 +56,7 @@ export function SourcePanel({ bot }: { bot: Bot }) {
         <ChangeConnection botId={bot.id} source={s} onCancel={() => setMode("view")} onSaved={done} onEditMapping={() => setMode("mapping")} />
       ) : connected ? (
         <Summary
+          manage={manage}
           source={s}
           onEditMapping={() => setMode("mapping")}
           onChangeConnection={() => setMode("connection")}
@@ -67,7 +71,11 @@ export function SourcePanel({ bot }: { bot: Bot }) {
             Connect the bot's Postgres database and pick the table where it keeps its users. Orbit reads
             it live and read-only; nothing is copied.
           </p>
-          <Button variant="primary" onClick={() => setMode("setup")}>Connect database</Button>
+          {manage ? (
+            <Button variant="primary" onClick={() => setMode("setup")}>Connect database</Button>
+          ) : (
+            <span className="text-sm text-ink-faint">An admin can connect it.</span>
+          )}
         </div>
       )}
     </div>
@@ -75,11 +83,13 @@ export function SourcePanel({ bot }: { bot: Bot }) {
 }
 
 function Summary({
+  manage,
   source: s,
   onEditMapping,
   onChangeConnection,
   onDisconnect,
 }: {
+  manage: boolean;
   source: BotSourceInfo;
   onEditMapping: () => void;
   onChangeConnection: () => void;
@@ -103,11 +113,11 @@ function Summary({
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-1">
+        {manage && <div className="flex shrink-0 flex-wrap gap-1">
           <Button size="sm" variant="ghost" onClick={onEditMapping}>Edit mapping</Button>
           <Button size="sm" variant="ghost" onClick={onChangeConnection}>Change connection</Button>
           <Button size="sm" variant="ghost" onClick={onDisconnect}>Disconnect</Button>
-        </div>
+        </div>}
       </div>
       {!healthy && s.last_error && <Notice>Couldn't read the bot's database: {s.last_error}.</Notice>}
     </div>

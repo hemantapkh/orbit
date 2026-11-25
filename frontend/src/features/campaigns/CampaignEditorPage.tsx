@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Bold, Check, ChevronDown, X, Code, Italic, Link2, Paperclip, Plus, Strikethrough, Trash2, Underline } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { useOrg } from "../../app/auth";
 import {
   api,
   type Audience,
@@ -32,7 +33,9 @@ export function CampaignEditorPage() {
     enabled: !!campaignId,
   });
   const bots = useQuery({ queryKey: ["bots"], queryFn: () => api<Bot[]>("/bots") });
+  const { can } = useOrg();
 
+  if (!can("sender")) return <Notice>Your role in this organization is read-only, so you can't create or edit broadcasts.</Notice>;
   if (campaignId && existing.isPending) return <Skeleton className="h-96" />;
   if (existing.error) return <Notice>{existing.error.message}</Notice>;
   if (bots.isPending) return <Skeleton className="h-96" />;

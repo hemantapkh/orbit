@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { useOrg } from "../../app/auth";
 import { api, type Bot, type Campaign, type CampaignStatus, type Page } from "../../lib/api";
 import { fmt, pct, when } from "../../lib/format";
 import { Button, buttonClass, CampaignStatusTag, cx, Input, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
@@ -51,6 +52,7 @@ export function CampaignsPage() {
     refetchInterval: (r) => (r.state.data?.items.length ? 3000 : 30000),
   });
   const bots = useQuery({ queryKey: ["bots"], queryFn: () => api<Bot[]>("/bots") });
+  const { can } = useOrg();
   const botName = (id: number) => bots.data?.find((b) => b.id === id)?.username ?? String(id);
   const qc = useQueryClient();
   const remove = useMutation({
@@ -70,8 +72,8 @@ export function CampaignsPage() {
         lede="One message, sent through any combination of your bots."
         actions={
           <>
-            <Link to="/broadcasts/test-groups" className={buttonClass("secondary")}>Test groups</Link>
-            <Link to="/broadcasts/new" className={buttonClass("primary")}>New broadcast</Link>
+            {can("sender") && <Link to="/broadcasts/test-groups" className={buttonClass("secondary")}>Test groups</Link>}
+            {can("sender") && <Link to="/broadcasts/new" className={buttonClass("primary")}>New broadcast</Link>}
           </>
         }
       />
@@ -146,7 +148,7 @@ export function CampaignsPage() {
             <span />
           </div>
           {list.data.items.map((c) => (
-            <Row key={c.id} c={c} botName={botName} onDelete={() => confirmDelete(c) && remove.mutate(c.id)} deleting={remove.isPending} />
+            <Row key={c.id} c={c} botName={botName} canDelete={can("sender")} onDelete={() => confirmDelete(c) && remove.mutate(c.id)} deleting={remove.isPending} />
           ))}
         </Panel>
       )}
@@ -165,7 +167,7 @@ export function CampaignsPage() {
   );
 }
 
-function Row({ c, botName, onDelete, deleting }: { c: Campaign; botName: (id: number) => string; onDelete: () => void; deleting: boolean }) {
+function Row({ c, botName, onDelete, deleting, canDelete }: { c: Campaign; botName: (id: number) => string; onDelete: () => void; deleting: boolean; canDelete: boolean }) {
   const s = c.stats;
   const audience =
     c.audience.mode === "selected"
@@ -207,7 +209,7 @@ function Row({ c, botName, onDelete, deleting }: { c: Campaign; botName: (id: nu
         )}
       </div>
       <span className="text-sm text-ink-soft max-md:col-span-2">{date}</span>
-      <button
+      {canDelete ? <button
         type="button"
         aria-label={`Delete ${c.name}`}
         title={c.status === "running" ? "Pause or stop it before deleting" : "Delete"}
@@ -216,7 +218,7 @@ function Row({ c, botName, onDelete, deleting }: { c: Campaign; botName: (id: nu
         className="justify-self-end rounded-md p-2 text-ink-faint opacity-60 transition-opacity group-hover:opacity-100 hover:bg-status-error/10 hover:text-status-error focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-faint max-md:hidden"
       >
         <Trash2 size={16} />
-      </button>
+      </button> : <span />}
     </div>
   );
 }

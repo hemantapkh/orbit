@@ -13,6 +13,8 @@ import { CampaignEditorPage } from "./features/campaigns/CampaignEditorPage";
 import { CampaignsPage } from "./features/campaigns/CampaignsPage";
 import { SharePage } from "./features/campaigns/SharePage";
 import { TestGroupsPage } from "./features/campaigns/TestGroupsPage";
+import { InvitePage } from "./features/settings/InvitePage";
+import { SettingsPage } from "./features/settings/SettingsPage";
 import { OverviewPage } from "./features/overview/OverviewPage";
 
 // Charts are heavy; load analytics only when someone opens it.
@@ -30,6 +32,7 @@ createRoot(document.getElementById("root")!).render(
           <Routes>
           {/* Public, read-only: the token in the URL is the credential. */}
           <Route path="/share/:token" element={<SharePage />} />
+          <Route path="/invite/:token" element={<InvitePage />} />
           <Route
             path="/*"
             element={
@@ -65,6 +68,7 @@ function OperatorRoutes() {
             </Suspense>
           }
         />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { BotAvatar } from "../../components/BotAvatar";
+import { useOrg } from "../../app/auth";
 import { api, type Bot } from "../../lib/api";
 import { fmt } from "../../lib/format";
 import { Button, cx, Dialog, Field, Input, StatusDot, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
@@ -10,6 +11,7 @@ import { Button, cx, Dialog, Field, Input, StatusDot, Notice, PageHeader, Panel,
 export function BotsPage() {
   const [connecting, setConnecting] = useState(false);
   const bots = useQuery({ queryKey: ["bots"], queryFn: () => api<Bot[]>("/bots") });
+  const { can } = useOrg();
   const qc = useQueryClient();
   const refresh = useMutation({
     mutationFn: () => api<Bot[]>("/bots/refresh", { method: "POST" }),
@@ -27,13 +29,13 @@ export function BotsPage() {
         lede="Each bot keeps its own code and database. Orbit sends with the bot's token and reads who it can reach from its database, read-only."
         actions={
           <>
-            {!!bots.data?.length && (
+            {!!bots.data?.length && can("sender") && (
               <Button onClick={() => refresh.mutate()} disabled={refresh.isPending} title="Re-check every bot with Telegram and recount audiences">
                 <RefreshCw size={15} className={cx(refresh.isPending && "animate-spin")} />
                 {refresh.isPending ? "Refreshing…" : "Refresh"}
               </Button>
             )}
-            <Button variant="primary" onClick={() => setConnecting(true)}>Connect a bot</Button>
+            {can("admin") && <Button variant="primary" onClick={() => setConnecting(true)}>Connect a bot</Button>}
           </>
         }
       />
