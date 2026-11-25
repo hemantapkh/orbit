@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Bot, LayoutGrid, LogOut, Megaphone } from "lucide-react";
-import { NavLink, Outlet } from "react-router";
+import { useEffect, useRef } from "react";
+import { NavLink, Outlet, useLocation } from "react-router";
 import { ErrorBoundary } from "./errors";
 import { api } from "../lib/api";
 import { cx } from "../components/ui";
@@ -16,6 +17,13 @@ const NAV = [
 
 export function Shell() {
   const me = useMe();
+  const mainRef = useRef<HTMLElement>(null);
+  const { pathname } = useLocation();
+  // Each page starts at the top (main keeps its own scroll position otherwise).
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0 });
+  }, [pathname]);
   const qc = useQueryClient();
 
   async function signOut() {
@@ -25,8 +33,10 @@ export function Shell() {
   }
 
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[232px_minmax(0,1fr)]">
-      <aside className="bg-panel text-panel-ink md:sticky md:top-0 md:flex md:h-screen md:flex-col">
+    // Desktop: the window never scrolls, only <main> does, so the sidebar and any sticky
+    // bars inside main can't drift. Phones keep normal page scrolling.
+    <div className="min-h-screen md:grid md:h-dvh md:grid-cols-[232px_minmax(0,1fr)] md:overflow-hidden">
+      <aside className="bg-panel text-panel-ink md:flex md:h-dvh md:flex-col md:overflow-y-auto md:overscroll-contain">
         <div className="flex items-center justify-between px-5 py-4 md:py-6">
           <OrbitLogo tone="inverse" size={26} />
         </div>
@@ -62,10 +72,12 @@ export function Shell() {
           </button>
         </div>
       </aside>
-      <main className="mx-auto w-full max-w-[1120px] px-4 py-8 sm:px-8 md:py-12">
-        <ErrorBoundary>
-          <Outlet />
-        </ErrorBoundary>
+      <main ref={mainRef} className="md:h-dvh md:overflow-y-auto md:overscroll-contain">
+        <div className="mx-auto w-full max-w-[1120px] px-4 py-8 sm:px-8 md:py-12">
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
+        </div>
       </main>
     </div>
   );

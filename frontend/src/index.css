@@ -43,6 +43,12 @@
   -webkit-font-smoothing: antialiased;
 }
 
+html,
+body {
+  /* No elastic overscroll: the sidebar and sticky bars stay put at the edges. */
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
