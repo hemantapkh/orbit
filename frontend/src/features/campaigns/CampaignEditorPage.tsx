@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Bold, Check, X, Code, Italic, Link2, Paperclip, Plus, Strikethrough, Trash2, Underline } from "lucide-react";
+import { ArrowLeft, Bold, Check, ChevronDown, X, Code, Italic, Link2, Paperclip, Plus, Strikethrough, Trash2, Underline } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -60,6 +60,7 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
     testGroups.data?.find((g) => g.is_default)?.id ??
     testGroups.data?.[0]?.id ??
     null;
+  const testGroupName = testGroups.data?.find((g) => g.id === testGroupId)?.name ?? "test group";
   const sendTest = useMutation({
     mutationFn: () =>
       api<TestSendResult[]>(`/test-groups/${testGroupId}/send`, {
@@ -273,7 +274,7 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
           </section>
           {(sendTest.data || sendTest.error) && (
             <TestResults
-              groupName={testGroups.data?.find((g) => g.id === testGroupId)?.name ?? "test group"}
+              groupName={testGroupName}
               results={sendTest.data}
               error={sendTest.error}
               bots={bots}
@@ -295,28 +296,33 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
               <div className="inline-flex">
                 <Button
                   className="rounded-r-none"
+                  title={`Send to ${testGroupName}`}
                   onClick={() => sendTest.mutate()}
                   disabled={isEmpty || tooLong || sendTest.isPending}
                 >
                   {sendTest.isPending ? "Sending test…" : "Send test"}
                 </Button>
-                <select
-                  aria-label="Test group"
-                  title="Who receives the test"
-                  value={testGroupId}
-                  onChange={(e) => {
-                    if (e.target.value === "manage") nav("/broadcasts/test-groups");
-                    else setPickedGroup(Number(e.target.value));
-                  }}
-                  className="h-10 max-w-[180px] truncate rounded-r-lg border border-l-0 border-line bg-surface pl-3 text-sm text-ink-soft shadow-[0_1px_2px_rgba(23,33,30,0.05)] hover:bg-canvas/60 focus:outline-none"
-                >
-                  {testGroups.data?.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name} ({g.members.length})
-                    </option>
-                  ))}
-                  <option value="manage">Manage test groups…</option>
-                </select>
+                {/* Chevron only: a transparent native select sits on top, so it stays accessible. */}
+                <div className="relative grid w-9 place-items-center rounded-r-lg border border-l-0 border-line bg-surface text-ink-soft shadow-[0_1px_2px_rgba(23,33,30,0.05)] hover:bg-canvas/60 focus-within:shadow-[0_0_0_4px_rgba(184,145,58,0.16)]">
+                  <ChevronDown size={16} aria-hidden />
+                  <select
+                    aria-label={`Test group: ${testGroupName}`}
+                    title={`Test group: ${testGroupName}`}
+                    value={testGroupId}
+                    onChange={(e) => {
+                      if (e.target.value === "manage") nav("/broadcasts/test-groups");
+                      else setPickedGroup(Number(e.target.value));
+                    }}
+                    className="absolute inset-0 cursor-pointer opacity-0"
+                  >
+                    {testGroups.data?.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} ({g.members.length})
+                      </option>
+                    ))}
+                    <option value="manage">Manage test groups…</option>
+                  </select>
+                </div>
               </div>
             ) : (
               <Link to="/broadcasts/test-groups" className={buttonClass("secondary")}>
