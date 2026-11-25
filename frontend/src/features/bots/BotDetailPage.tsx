@@ -52,35 +52,23 @@ export function BotDetailPage() {
         <ArrowLeft size={15} /> Bots
       </Link>
 
-      <header className="mb-8 overflow-hidden rounded-2xl border border-line bg-surface shadow-[0_1px_2px_rgba(23,33,30,0.04),0_8px_24px_-12px_rgba(23,33,30,0.08)]">
-        {/* Telegram bots have no cover image, so the cover is the bot's own photo, blurred. */}
-        <div className="relative h-32 overflow-hidden bg-panel sm:h-36" aria-hidden>
-          {b.avatar_version && (
-            <img
-              src={`/api/bots/${b.id}/avatar?v=${encodeURIComponent(b.avatar_version)}`}
-              alt=""
-              className="absolute inset-0 h-full w-full scale-150 object-cover opacity-70 blur-2xl"
-            />
-          )}
-          <div className="absolute inset-0 bg-panel/45" />
-        </div>
-        <div className="px-6 pb-6">
-          <div className="-mt-12 flex flex-wrap items-end justify-between gap-4">
-            <BotAvatar bot={b} size={96} className="ring-4 ring-surface" />
-            <div className="flex items-center gap-2 pb-1 text-sm text-ink-soft">
+      <header className="mb-8 flex flex-wrap items-center gap-5">
+        <BotAvatar bot={b} size={72} />
+        <div className="min-w-0 flex-1">
+          <h1 className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[28px] leading-tight font-semibold tracking-[-0.015em]">
+            {b.display_name}
+            <span className="inline-flex items-center gap-1.5 text-sm font-normal text-ink-soft">
               <BotStatus bot={b} />
               {!b.is_active ? "Disabled" : !b.token_valid ? "Token rejected" : s.source_error ? "Database unreachable" : "Online"}
-            </div>
-          </div>
-          <h1 className="mt-4 text-[28px] leading-tight font-semibold tracking-[-0.015em]">{b.display_name}</h1>
+            </span>
+          </h1>
           <p className="mt-1 text-sm text-ink-soft">
             <a href={`https://t.me/${b.username}`} target="_blank" rel="noreferrer" className="font-medium text-ink underline-offset-4 hover:underline">
               @{b.username}
             </a>
             <span className="text-ink-faint"> · ID {b.telegram_id} · added {when(b.created_at)}</span>
           </p>
-          {b.about && <p className="mt-3 max-w-[64ch] text-ink-soft">{b.about}</p>}
-          {b.description && <p className="mt-2 max-w-[64ch] text-sm text-ink-faint">Note: {b.description}</p>}
+          {b.about && <p className="mt-2 max-w-[64ch] text-ink-soft">{b.about}</p>}
         </div>
       </header>
 

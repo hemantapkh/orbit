@@ -50,7 +50,6 @@ export type Bot = {
   telegram_id: number;
   username: string;
   display_name: string;
-  description: string;
   is_active: boolean;
   token_valid: boolean;
   /** Telegram short description ("About") */

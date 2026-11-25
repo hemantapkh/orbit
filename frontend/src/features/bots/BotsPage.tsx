@@ -91,14 +91,12 @@ function ConnectBotDialog({ open, onClose }: { open: boolean; onClose: () => voi
   const qc = useQueryClient();
   const nav = useNavigate();
   const [token, setToken] = useState("");
-  const [description, setDescription] = useState("");
   const connect = useMutation({
-    mutationFn: () => api<Bot>("/bots", { method: "POST", json: { token: token.trim(), description } }),
+    mutationFn: () => api<Bot>("/bots", { method: "POST", json: { token: token.trim() } }),
     onSuccess: (bot) => {
       qc.invalidateQueries({ queryKey: ["bots"] });
       qc.invalidateQueries({ queryKey: ["overview"] });
       setToken("");
-      setDescription("");
       onClose();
       nav(`/bots/${bot.id}?connect=database`); // next step: connect the bot's database
     },
@@ -129,9 +127,6 @@ function ConnectBotDialog({ open, onClose }: { open: boolean; onClose: () => voi
               onChange={(e) => setToken(e.target.value)}
               className="font-mono text-sm"
             />
-          </Field>
-          <Field label="Note" htmlFor="desc" hint="Optional. What this bot is for, so teammates know.">
-            <Input id="desc" value={description} onChange={(e) => setDescription(e.target.value)} />
           </Field>
           <div className="flex justify-end gap-2">
             <Button onClick={close}>Cancel</Button>
