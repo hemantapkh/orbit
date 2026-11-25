@@ -34,6 +34,19 @@ class SourceFilter(BaseModel):
     value: str | int | float | bool | None = None
 
 
+class Join(BaseModel):
+    """A table linked to the main table: related.related_column = main.base_column.
+
+    Columns on it are referenced as "table.column" in the mapping and filters."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    table: str = Field(min_length=1, max_length=128)
+    db_schema: str | None = Field(default=None, alias="schema", max_length=128)
+    base_column: str = Field(min_length=1, max_length=128)
+    related_column: str = Field(min_length=1, max_length=128)
+
+
 class SourceSpec(BaseModel):
     """Which rows of which table are this bot's subscribers."""
 
@@ -43,6 +56,7 @@ class SourceSpec(BaseModel):
     db_schema: str | None = Field(default=None, alias="schema", max_length=128)
     column_map: ColumnMap
     filters: list[SourceFilter] = Field(default_factory=list, max_length=20)
+    joins: list[Join] = Field(default_factory=list, max_length=10)
 
 
 class ConnectionIn(BaseModel):
@@ -74,12 +88,24 @@ class ColumnInfo(BaseModel):
     nullable: bool
 
 
+class RelationInfo(BaseModel):
+    """A table linked to this one by a foreign key, in either direction."""
+
+    table: str
+    schema_: str | None = Field(serialization_alias="schema")
+    base_column: str
+    related_column: str
+    # one: at most one related row per row here (e.g. settings); many: any number.
+    cardinality: Literal["one", "many"]
+
+
 class TableInfo(BaseModel):
     schema_: str | None = Field(serialization_alias="schema")
     name: str
     kind: Literal["table", "view"]
     row_estimate: int | None
     columns: list[ColumnInfo]
+    relations: list[RelationInfo] = Field(default_factory=list)
     suggested: dict[str, str]
 
 
@@ -105,6 +131,7 @@ class SourceOut(BaseModel):
     table: str | None = None
     column_map: dict = Field(default_factory=dict)
     filters: list = Field(default_factory=list)
+    joins: list = Field(default_factory=list)
     status: str | None = None
     last_error: str | None = None
     last_checked_at: datetime | None = None

@@ -37,6 +37,7 @@ def spec_of(source: BotSource) -> SourceSpec:
         db_schema=source.schema_name,
         column_map=ColumnMap.model_validate(source.column_map),
         filters=source.filters or [],
+        joins=source.joins or [],
     )
 
 
@@ -72,12 +73,12 @@ def _jsonable(v):
 
 async def preview(engine: AsyncEngine, spec: SourceSpec) -> PreviewOut:
     async with engine.connect() as conn:
-        table = await reflect(conn, spec)
-        total = await conn.scalar(count_query(table, spec))
-        rows = (await conn.execute(rows_query(table, spec).limit(PREVIEW_ROWS))).mappings().all()
+        src = await reflect(conn, spec)
+        total = await conn.scalar(count_query(src, spec))
+        rows = (await conn.execute(rows_query(src, spec).limit(PREVIEW_ROWS))).mappings().all()
 
     warnings: list[str] = []
-    chat_col = table.c[spec.column_map.chat_id]
+    chat_col = src.base.c[spec.column_map.chat_id]
     try:
         numeric_type = chat_col.type.python_type in (int, Decimal)
     except NotImplementedError:
@@ -153,6 +154,7 @@ class _IdCache:
                 source.table_name,
                 source.column_map,
                 source.filters,
+                source.joins,
             )
         )
 
@@ -274,8 +276,8 @@ async def search_people(session: AsyncSession, bot_id: int, q: str, limit: int =
     if source is not None:
         spec = spec_of(source)
         async with (await engine_for(source)).connect() as conn:
-            table = await reflect(conn, spec)
-            rows = (await conn.execute(search_query(table, spec, q, limit))).mappings().all()
+            src = await reflect(conn, spec)
+            rows = (await conn.execute(search_query(src, spec, q, limit))).mappings().all()
         skip = await suppressed_ids(session, bot_id)
         out = []
         for r in rows:

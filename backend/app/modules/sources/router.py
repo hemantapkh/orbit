@@ -114,6 +114,7 @@ def _out(source: BotSource | None) -> SourceOut:
         table=source.table_name,
         column_map=source.column_map,
         filters=source.filters,
+        joins=source.joins or [],
         status=source.status,
         last_error=source.last_error,
         last_checked_at=source.last_checked_at,
@@ -168,6 +169,7 @@ async def save_source(bot_id: int, body: SourceSaveIn, session: SessionDep, admi
     source.table_name = spec.table
     source.column_map = spec.column_map.model_dump(exclude_none=True)
     source.filters = [f.model_dump() for f in spec.filters]
+    source.joins = [j.model_dump(by_alias=True) for j in spec.joins]
     source.status, source.last_error, source.last_checked_at = SourceStatus.HEALTHY, None, now
     source.cached_count, source.cached_count_at = result.total, now
     record(

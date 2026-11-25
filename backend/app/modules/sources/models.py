@@ -31,6 +31,8 @@ class BotSource(Base, TimestampMixin):
     table_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     column_map: Mapped[dict] = mapped_column(JSON, default=dict)
     filters: Mapped[list] = mapped_column(JSON, default=list)
+    # Linked tables used by the mapping or filters (see schemas.Join).
+    joins: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(16), default=SourceStatus.UNCHECKED)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
