@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
+import { Download } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { api, type AnalyticsRange, type AudienceAnalytics, type Bot } from "../../lib/api";
+import { downloadCsv } from "../../lib/csv";
 import { fmt, pct } from "../../lib/format";
 import { cx, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
 import { BOT_COLORS } from "../campaigns/Progress";
@@ -15,6 +17,21 @@ const RANGES: { key: AnalyticsRange; label: string; long: string }[] = [
 ];
 
 type BotInfo = { id: number; username: string; color: string };
+
+const today = () => new Date().toISOString().slice(0, 10);
+const fileName = (what: string, d: AudienceAnalytics) => `orbit-${what}-${d.period.range}-${today()}.csv`;
+
+function CsvButton({ onClick, label = "CSV" }: { onClick: () => void; label?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-ink-soft hover:bg-line/60 hover:text-ink"
+    >
+      <Download size={14} /> {label}
+    </button>
+  );
+}
 
 export function AnalyticsPage() {
   const [range, setRange] = useState<AnalyticsRange>("30d");
@@ -41,7 +58,11 @@ export function AnalyticsPage() {
 
   return (
     <>
-      <PageHeader title="Analytics" lede="Who your bots reach, how that's changing, and where audiences overlap." />
+      <PageHeader
+        title="Analytics"
+        lede="Who your bots reach, how that's changing, and where audiences overlap."
+        actions={data.data && <CsvButton label="Download summary" onClick={() => exportSummary(data.data!, info, long)} />}
+      />
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div role="radiogroup" aria-label="Time range" className="inline-flex rounded-lg bg-canvas p-1 text-sm ring-1 ring-line">
@@ -198,6 +219,17 @@ function Growth({ d, bots, name }: { d: AudienceAnalytics; bots: BotInfo[]; name
   return (
     <section aria-labelledby="growth-title">
       <SectionHead title="Growth">
+        <div className="flex items-center gap-2">
+        {series.length > 0 && (
+          <CsvButton
+            onClick={() =>
+              downloadCsv(fileName("growth", d), [
+                [unit === "day" ? "date" : unit === "week" ? "week_starting" : "month", ...series.map((s) => `@${s.username}`), "total_new", "signups_to_date"],
+                ...buckets.map((b, i) => [b, ...series.map((s) => grid[i].get(s.id) ?? 0), totals[i], cumulative[i]]),
+              ])
+            }
+          />
+        )}
         <div role="radiogroup" aria-label="Show" className="inline-flex rounded-lg bg-canvas p-1 text-sm ring-1 ring-line">
           {(
             [
@@ -216,6 +248,7 @@ function Growth({ d, bots, name }: { d: AudienceAnalytics; bots: BotInfo[]; name
               {label}
             </button>
           ))}
+        </div>
         </div>
       </SectionHead>
       <Panel className="px-5 pt-4 pb-3">
@@ -377,7 +410,25 @@ function OverlapView({ d, bots, name }: { d: AudienceAnalytics; bots: BotInfo[];
 
   return (
     <section aria-labelledby="overlap-title">
-      <SectionHead title="Overlap between bots" />
+      <SectionHead title="Overlap between bots">
+        {ids.length > 1 && (
+          <CsvButton
+            onClick={() =>
+              downloadCsv(fileName("overlap", d), [
+                ["bot_a", "bot_b", "shared_people", "bot_a_people", "bot_b_people", "share_of_smaller_bot"],
+                ...d.overlap.pairs.map((p) => {
+                  const a = d.overlap.per_bot[p.a];
+                  const b = d.overlap.per_bot[p.b];
+                  return [`@${name(p.a)}`, `@${name(p.b)}`, p.people, a, b, Math.min(a, b) ? (p.people / Math.min(a, b)).toFixed(4) : 0];
+                }),
+                [],
+                ["on_number_of_bots", "people"],
+                ...dist.map(([k, v]) => [k, v]),
+              ])
+            }
+          />
+        )}
+      </SectionHead>
       <Panel className="space-y-5 p-5">
         {ids.length < 2 ? (
           <p className="text-sm text-ink-soft">Select two or more bots to see who they share.</p>
@@ -477,7 +528,19 @@ function LanguagesView({ d, name }: { d: AudienceAnalytics; name: (id: number) =
   const missingAll = d.languages.missing_language.length === d.bots.length;
   return (
     <section aria-labelledby="lang-title">
-      <SectionHead title="Languages" />
+      <SectionHead title="Languages">
+        {items.length > 0 && (
+          <CsvButton
+            onClick={() =>
+              downloadCsv(fileName("languages", d), [
+                ["language_code", "language", "people", "share"],
+                ...items.map((i) => [i.code, languageName(i.code), i.people, (i.people / total).toFixed(4)]),
+                ...(d.languages.unknown ? [["", "Not recorded", d.languages.unknown, (d.languages.unknown / total).toFixed(4)]] : []),
+              ])
+            }
+          />
+        )}
+      </SectionHead>
       <Panel className="p-5">
         {missingAll ? (
           <p className="text-sm text-ink-soft">
@@ -521,7 +584,16 @@ function BlockedView({ d }: { d: AudienceAnalytics }) {
   if (!values.some(Boolean)) return null;
   return (
     <section aria-labelledby="blocked-title">
-      <SectionHead title="Blocks over time" />
+      <SectionHead title="Blocks over time">
+        <CsvButton
+          onClick={() =>
+            downloadCsv(fileName("blocks", d), [
+              [unit === "day" ? "date" : unit === "week" ? "week_starting" : "month", "blocked"],
+              ...d.period.buckets.map((b, i) => [b, values[i]]),
+            ])
+          }
+        />
+      </SectionHead>
       <Panel className="px-5 pt-4 pb-3">
         <p className="mb-3 text-xs text-ink-soft">People found to have blocked a bot, per {unitLabel[unit]}, while sending.</p>
         <div className="relative" onMouseLeave={() => setHover(null)}>
@@ -545,4 +617,25 @@ function BlockedView({ d }: { d: AudienceAnalytics }) {
       </Panel>
     </section>
   );
+}
+
+function exportSummary(d: AudienceAnalytics, bots: BotInfo[], long: string) {
+  const name = (id: number) => `@${bots.find((b) => b.id === id)?.username ?? id}`;
+  const k = d.kpis;
+  downloadCsv(fileName("summary", d), [
+    ["metric", "value"],
+    ["period", long],
+    ["from", d.period.start],
+    ["to", d.period.end],
+    ["bots", d.bots.map(name).join(" ")],
+    ["people", k.people],
+    ["subscriptions", k.subscriptions],
+    ["people_on_2_or_more_bots", k.multi_bot_people],
+    ["new_people", k.new_people ?? ""],
+    ["new_people_previous_period", k.new_people_previous ?? ""],
+    ["blocked", k.blocked],
+    [],
+    ["bot", "people"],
+    ...Object.entries(d.overlap.per_bot).map(([id, n]) => [name(Number(id)), n]),
+  ]);
 }
