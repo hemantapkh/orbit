@@ -43,3 +43,34 @@ def seal_token(token: str) -> str:
 
 def unseal_token(sealed: str) -> str:
     return decrypt_secret(sealed)
+
+
+class ChatUnreachable(Exception):
+    """The bot can't see this chat: the user never started it, or it isn't in the group."""
+
+
+@dataclass(frozen=True, slots=True)
+class ChatInfo:
+    chat_id: int
+    kind: str  # private | group | supergroup | channel
+    title: str
+
+
+async def look_up_chat(client: TelegramClient, token: str, chat_id: int) -> ChatInfo:
+    try:
+        chat = await client.call(token, "getChat", {"chat_id": chat_id})
+    except TelegramError as exc:
+        if exc.error_code in (400, 403):
+            raise ChatUnreachable(
+                "This bot can't reach that chat. For a person: open the bot and press Start. "
+                "For a group: add the bot. For a channel: add the bot as an admin."
+            ) from exc
+        raise TelegramUnavailable(f"Telegram: {exc.description}") from exc
+    name = chat.get("title") or " ".join(
+        p for p in (chat.get("first_name"), chat.get("last_name")) if p
+    )
+    if chat.get("username"):
+        name = f"{name} (@{chat['username']})" if name else f"@{chat['username']}"
+    return ChatInfo(
+        chat_id=chat["id"], kind=chat.get("type", "private"), title=name or str(chat_id)
+    )

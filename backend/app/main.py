@@ -17,6 +17,7 @@ from app.modules.auth.service import bootstrap_admin
 from app.modules.bots.router import router as bots_router
 from app.modules.campaigns.engine import DeliveryEngine
 from app.modules.campaigns.router import router as campaigns_router
+from app.modules.campaigns.test_groups import router as test_groups_router
 from app.modules.integrations.router import router as integration_router
 from app.modules.media.router import router as media_router
 from app.modules.overview.router import router as overview_router
@@ -29,6 +30,7 @@ ADMIN_ROUTERS = [
     bots_router,
     sources_router,
     campaigns_router,
+    test_groups_router,
     media_router,
     activity_router,
 ]

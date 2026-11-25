@@ -60,6 +60,17 @@ class FakeTelegram:
             return self._err(401, "Unauthorized")
         if method == "getMe":
             return self._ok({**TOKENS[token], "is_bot": True})
+        if method == "getChat":
+            chat_id = json.loads(request.content)["chat_id"]
+            if chat_id in self.missing:
+                return self._err(400, "Bad Request: chat not found")
+            if chat_id < -1_000_000_000_000:
+                return self._ok({"id": chat_id, "type": "channel", "title": "Release notes"})
+            if chat_id < 0:
+                return self._ok({"id": chat_id, "type": "group", "title": "QA team"})
+            return self._ok(
+                {"id": chat_id, "type": "private", "first_name": "Ana", "username": "ana"}
+            )
 
         ctype = request.headers.get("content-type", "")
         if ctype.startswith("multipart/"):

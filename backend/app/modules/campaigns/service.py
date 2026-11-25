@@ -4,6 +4,9 @@ from collections.abc import Iterable
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.telegram.bots import unseal_token
+from app.integrations.telegram.client import TelegramClient
+from app.integrations.telegram.delivery import SendResult, deliver
 from app.integrations.telegram.messages import MessageContent
 from app.modules.bots.models import Bot
 from app.modules.campaigns.models import Campaign, CampaignBot, Delivery, DeliveryStatus
@@ -15,6 +18,8 @@ from app.modules.campaigns.schemas import (
     DeliveryStats,
     RelatedSend,
 )
+from app.modules.media.models import MediaAsset
+from app.modules.media.service import media_ref_for_bot, remember_file_id
 from app.modules.subscribers.service import counts_by_bot
 
 
@@ -146,3 +151,22 @@ async def skip_pending(session: AsyncSession, campaign_id: int) -> None:
         .where(Delivery.campaign_id == campaign_id, Delivery.status == DeliveryStatus.PENDING)
         .values(status=DeliveryStatus.SKIPPED)
     )
+
+
+async def send_once(
+    session: AsyncSession,
+    telegram: TelegramClient,
+    bot: Bot,
+    chat_id: int,
+    message: MessageContent,
+) -> SendResult:
+    """Send one message outside a campaign (test sends). Reuses this bot's media upload."""
+    asset = None
+    media = None
+    if message.media_id is not None:
+        asset = await session.get(MediaAsset, message.media_id)
+        media = await media_ref_for_bot(session, asset, bot.id)
+    result = await deliver(telegram, unseal_token(bot.token_encrypted), chat_id, message, media)
+    if asset and result.file_id:
+        await remember_file_id(session, asset.id, bot.id, result.file_id)
+    return result

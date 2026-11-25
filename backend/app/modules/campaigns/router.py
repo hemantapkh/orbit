@@ -3,8 +3,7 @@ from sqlalchemy import func, select
 
 from app.core.db import utcnow
 from app.core.deps import SessionDep, TelegramDep
-from app.integrations.telegram.bots import unseal_token
-from app.integrations.telegram.delivery import SendStatus, deliver
+from app.integrations.telegram.delivery import SendStatus
 from app.integrations.telegram.messages import MessageContent
 from app.modules.activity.service import record
 from app.modules.auth.deps import CurrentAdmin
@@ -24,7 +23,6 @@ from app.modules.campaigns.schemas import (
     TestSendOut,
 )
 from app.modules.media.models import MediaAsset
-from app.modules.media.service import media_ref_for_bot, remember_file_id
 from app.modules.subscribers.service import active_audience_size
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
@@ -337,19 +335,10 @@ async def test_send(body: TestSendIn, session: SessionDep, telegram: TelegramDep
     if bot is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Bot not found")
     await _validate_message(session, body.message, for_launch=True)
-    media = None
-    asset = None
-    if body.message.media_id is not None:
-        asset = await session.get(MediaAsset, body.message.media_id)
-        media = await media_ref_for_bot(session, asset, bot.id)
-    sent = await deliver(
-        telegram, unseal_token(bot.token_encrypted), body.chat_id, body.message, media
-    )
+    sent = await service.send_once(session, telegram, bot, body.chat_id, body.message)
     if sent.status != SendStatus.DELIVERED:
         hint = ""
         if sent.status in (SendStatus.RECIPIENT_BLOCKED, SendStatus.RECIPIENT_UNREACHABLE):
             hint = " Open the bot in Telegram and press Start first."
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Telegram: {sent.error}.{hint}")
-    if asset and sent.file_id:
-        await remember_file_id(session, asset.id, bot.id, sent.file_id)
     return TestSendOut(message_id=sent.message_id)

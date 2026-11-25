@@ -48,6 +48,19 @@ class Campaign(Base, TimestampMixin):
     )
 
 
+class TestGroup(Base, TimestampMixin):
+    """Saved recipients for test sends: people, groups or channels, each via one bot."""
+
+    __test__ = False  # not a pytest test class
+    __tablename__ = "test_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    # [{bot_id, chat_id, label, kind}]
+    members: Mapped[list] = mapped_column(JSON, default=list)
+    is_default: Mapped[bool] = mapped_column(default=False)
+
+
 class CampaignBot(Base):
     """Audience selection: which bots a campaign goes out through."""
 
