@@ -7,11 +7,9 @@ from app.modules.sources.schemas import SubscriberCounts
 
 class BotCreate(BaseModel):
     token: str = Field(min_length=20, max_length=128, pattern=r"^\d+:[\w-]+$")
-    description: str = Field(default="", max_length=500)
 
 
 class BotUpdate(BaseModel):
-    description: str | None = Field(default=None, max_length=500)
     is_active: bool | None = None
     token: str | None = Field(default=None, min_length=20, max_length=128, pattern=r"^\d+:[\w-]+$")
 
@@ -21,7 +19,6 @@ class BotOut(BaseModel):
     telegram_id: int
     username: str
     display_name: str
-    description: str
     is_active: bool
     token_valid: bool
     about: str  # Telegram short description ("About")

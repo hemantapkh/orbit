@@ -15,7 +15,6 @@ class Bot(Base, TimestampMixin):
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True)
     username: Mapped[str] = mapped_column(String(64))
     display_name: Mapped[str] = mapped_column(String(128))
-    description: Mapped[str] = mapped_column(Text, default="")
     token_encrypted: Mapped[str] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # From Telegram (refreshed on connect and "Check now"): profile texts and photo.

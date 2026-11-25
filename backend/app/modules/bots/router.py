@@ -31,7 +31,6 @@ def to_out(bot: Bot, counts: SubscriberCounts) -> BotOut:
         telegram_id=bot.telegram_id,
         username=bot.username,
         display_name=bot.display_name,
-        description=bot.description,
         is_active=bot.is_active,
         about=bot.about or "",
         telegram_description=bot.telegram_description or "",
@@ -77,7 +76,6 @@ async def connect_bot(
         telegram_id=me.telegram_id,
         username=me.username,
         display_name=me.display_name,
-        description=body.description,
         token_encrypted=seal_token(body.token),
         last_checked_at=utcnow(),
     )
@@ -111,8 +109,6 @@ async def update_bot(
         bot.token_encrypted = seal_token(body.token)
         bot.token_valid = True
         bot.last_checked_at = utcnow()
-    if body.description is not None:
-        bot.description = body.description
     if body.is_active is not None:
         bot.is_active = body.is_active
     record(
