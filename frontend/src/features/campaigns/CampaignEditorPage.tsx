@@ -17,6 +17,7 @@ import {
 } from "../../lib/api";
 import { duration, fmt, toLocalInput, when } from "../../lib/format";
 import { Button, buttonClass, cx, Dialog, fieldClass, StatusDot, Field, Input, Notice, Panel, Skeleton, Textarea } from "../../components/ui";
+import { BotAvatar } from "../../components/BotAvatar";
 import { MessagePreview } from "./MessagePreview";
 import { PeoplePicker } from "./PeoplePicker";
 
@@ -180,13 +181,13 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
                           disabled && !on && "cursor-not-allowed opacity-50",
                         )}
                       >
-                        <span
-                          className={cx(
-                            "grid size-4 place-items-center rounded-full border",
-                            on ? "border-panel bg-panel text-white" : "border-line-strong",
+                        <span className="relative">
+                          <BotAvatar bot={b} size={20} />
+                          {on && (
+                            <span className="absolute -right-1 -bottom-1 grid size-3 place-items-center rounded-full bg-panel text-white ring-2 ring-surface">
+                              <Check size={8} strokeWidth={4} />
+                            </span>
                           )}
-                        >
-                          {on && <Check size={10} strokeWidth={3.5} />}
                         </span>
                         <span className="font-medium">{b.display_name}</span>
                         <span className="text-ink-faint">{why ?? fmt(b.subscribers.active)}</span>

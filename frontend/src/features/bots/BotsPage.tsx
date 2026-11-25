@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router";
+import { BotAvatar } from "../../components/BotAvatar";
 import { api, type Bot } from "../../lib/api";
 import { fmt } from "../../lib/format";
 import { Button, Dialog, Field, Input, StatusDot, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
@@ -40,7 +41,12 @@ export function BotsPage() {
                 <tr key={b.id} className="hover:bg-canvas/70">
                   <td className="px-5 py-3.5">
                     <Link to={`/bots/${b.id}`} className="flex items-center gap-3">
-                      <BotStatus bot={b} />
+                      <span className="relative">
+                        <BotAvatar bot={b} size={36} />
+                        <span className="absolute -right-0.5 -bottom-0.5 grid place-items-center rounded-full bg-surface p-[2px]">
+                          <BotStatus bot={b} />
+                        </span>
+                      </span>
                       <span>
                         <span className="block font-medium">{b.display_name}</span>
                         <span className="block text-sm text-ink-faint">@{b.username}</span>

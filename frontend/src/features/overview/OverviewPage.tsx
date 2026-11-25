@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
+import { BotAvatar } from "../../components/BotAvatar";
 import { api, type Overview } from "../../lib/api";
 import { ago, fmt, pct } from "../../lib/format";
 import { buttonClass, CampaignStatusTag, StatusDot, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
@@ -71,7 +72,12 @@ function Board({ data }: { data: Overview }) {
                 to={`/bots/${b.id}`}
                 className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 py-4 hover:bg-canvas/70 sm:grid-cols-[auto_minmax(150px,220px)_minmax(0,1fr)_auto]"
               >
-                <StatusDot color={dot} label={dotLabel} />
+                <span className="relative">
+                  <BotAvatar bot={b} size={34} />
+                  <span className="absolute -right-0.5 -bottom-0.5 grid place-items-center rounded-full bg-surface p-[2px]">
+                    <StatusDot color={dot} label={dotLabel} />
+                  </span>
+                </span>
                 <div className="min-w-0">
                   <p className="truncate font-medium">{b.display_name}</p>
                   <p className="truncate text-sm text-ink-faint">@{b.username}</p>

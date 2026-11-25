@@ -7,6 +7,7 @@ import { ago, fmt, when } from "../../lib/format";
 import { Button, Dialog, Field, Input, Notice, Panel, Skeleton } from "../../components/ui";
 import { ActivityList } from "../activity/ActivityList";
 import { SourcePanel } from "../sources/SourcePanel";
+import { BotAvatar } from "../../components/BotAvatar";
 import { BotStatus } from "./BotsPage";
 
 export function BotDetailPage() {
@@ -51,19 +52,36 @@ export function BotDetailPage() {
         <ArrowLeft size={15} /> Bots
       </Link>
 
-      <header className="mb-8">
-        <h1 className="flex items-center gap-3 text-[28px] leading-tight font-semibold tracking-[-0.015em]">
-          <BotStatus bot={b} />
-          {b.display_name}
-          {!b.is_active && <span className="rounded-md bg-line px-2 py-0.5 text-sm font-medium text-ink-soft">Disabled</span>}
-        </h1>
-        <p className="mt-1.5 text-sm text-ink-soft">
-          <a href={`https://t.me/${b.username}`} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
-            @{b.username}
-          </a>
-          <span className="text-ink-faint"> · ID {b.telegram_id} · added {when(b.created_at)}</span>
-        </p>
-        {b.description && <p className="mt-2 max-w-[62ch] text-ink-soft">{b.description}</p>}
+      <header className="mb-8 overflow-hidden rounded-2xl border border-line bg-surface shadow-[0_1px_2px_rgba(23,33,30,0.04),0_8px_24px_-12px_rgba(23,33,30,0.08)]">
+        {/* Telegram bots have no cover image, so the cover is the bot's own photo, blurred. */}
+        <div className="relative h-32 overflow-hidden bg-panel sm:h-36" aria-hidden>
+          {b.avatar_version && (
+            <img
+              src={`/api/bots/${b.id}/avatar?v=${encodeURIComponent(b.avatar_version)}`}
+              alt=""
+              className="absolute inset-0 h-full w-full scale-150 object-cover opacity-70 blur-2xl"
+            />
+          )}
+          <div className="absolute inset-0 bg-panel/45" />
+        </div>
+        <div className="px-6 pb-6">
+          <div className="-mt-12 flex flex-wrap items-end justify-between gap-4">
+            <BotAvatar bot={b} size={96} className="ring-4 ring-surface" />
+            <div className="flex items-center gap-2 pb-1 text-sm text-ink-soft">
+              <BotStatus bot={b} />
+              {!b.is_active ? "Disabled" : !b.token_valid ? "Token rejected" : s.source_error ? "Database unreachable" : "Online"}
+            </div>
+          </div>
+          <h1 className="mt-4 text-[28px] leading-tight font-semibold tracking-[-0.015em]">{b.display_name}</h1>
+          <p className="mt-1 text-sm text-ink-soft">
+            <a href={`https://t.me/${b.username}`} target="_blank" rel="noreferrer" className="font-medium text-ink underline-offset-4 hover:underline">
+              @{b.username}
+            </a>
+            <span className="text-ink-faint"> · ID {b.telegram_id} · added {when(b.created_at)}</span>
+          </p>
+          {b.about && <p className="mt-3 max-w-[64ch] text-ink-soft">{b.about}</p>}
+          {b.description && <p className="mt-2 max-w-[64ch] text-sm text-ink-faint">Note: {b.description}</p>}
+        </div>
       </header>
 
       <div className="space-y-8">
@@ -92,6 +110,28 @@ export function BotDetailPage() {
             </div>
             <div className="border-t border-line px-6 py-5">
               <SourcePanel bot={b} />
+            </div>
+          </Panel>
+        </section>
+
+        <section aria-labelledby="telegram">
+          <h2 id="telegram" className="mb-3 text-lg font-semibold">On Telegram</h2>
+          <Panel className="divide-y divide-line">
+            <div className="px-5 py-4">
+              <p className="text-sm font-medium">Description</p>
+              <p className="text-xs text-ink-faint">What people see in an empty chat, before they press Start.</p>
+              <p className="mt-2 text-sm whitespace-pre-wrap text-ink-soft">{b.telegram_description || "Not set."}</p>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-sm font-medium">About</p>
+              <p className="text-xs text-ink-faint">Shown on the bot's profile.</p>
+              <p className="mt-2 text-sm text-ink-soft">{b.about || "Not set."}</p>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-sm">
+              <span className="text-ink-faint">Photo, name and texts are managed in Telegram. Orbit refreshes them when you press Check now.</span>
+              <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="font-medium text-accent-deep underline-offset-4 hover:underline">
+                Edit in @BotFather
+              </a>
             </div>
           </Panel>
         </section>

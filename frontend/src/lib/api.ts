@@ -53,6 +53,12 @@ export type Bot = {
   description: string;
   is_active: boolean;
   token_valid: boolean;
+  /** Telegram short description ("About") */
+  about: string;
+  /** what people see in an empty chat, before Start */
+  telegram_description: string;
+  /** null: no profile photo; changes when the photo changes */
+  avatar_version: string | null;
   last_checked_at: string | null;
   created_at: string;
   subscribers: SubscriberCounts;
@@ -180,6 +186,7 @@ export type Overview = {
     display_name: string;
     is_active: boolean;
     token_valid: boolean;
+    avatar_version: string | null;
   })[];
   total_bots: number;
   total_active_subscribers: number;

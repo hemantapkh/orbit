@@ -16,7 +16,7 @@ import {
 import { downloadCsv } from "../../lib/csv";
 import { duration, fmt, pct, when } from "../../lib/format";
 import { CampaignStatusTag, cx, fieldClass, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
-import { BOT_COLORS } from "../campaigns/Progress";
+import { botColor } from "../../components/BotAvatar";
 
 const RANGES: { key: AnalyticsRange; label: string; long: string }[] = [
   { key: "7d", label: "7D", long: "last 7 days" },
@@ -48,7 +48,7 @@ export function AnalyticsPage() {
   const bots = useQuery({ queryKey: ["bots"], queryFn: () => api<Bot[]>("/bots") });
   const connected = (bots.data ?? []).filter((b) => b.subscribers.connected).sort((a, b) => a.id - b.id);
   // Colour follows the bot (by id order), not what's currently selected.
-  const info: BotInfo[] = connected.map((b, i) => ({ id: b.id, username: b.username, color: BOT_COLORS[i % BOT_COLORS.length] }));
+  const info: BotInfo[] = connected.map((b) => ({ id: b.id, username: b.username, color: botColor(b.id) }));
   const selected = picked ?? connected.map((b) => b.id);
   const qs = new URLSearchParams([["range", range], ...(picked ? picked.map((id) => ["bot", String(id)]) : [])]);
   const long = RANGES.find((r) => r.key === range)!.long;
