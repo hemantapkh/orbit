@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.integrations.telegram.client import TelegramClient
 from app.modules.activity.router import router as activity_router
+from app.modules.analytics.router import router as analytics_router
 from app.modules.auth.router import router as auth_router
 from app.modules.auth.service import bootstrap_admin
 from app.modules.bots.router import router as bots_router
@@ -35,6 +36,7 @@ ADMIN_ROUTERS = [
     test_groups_router,
     media_router,
     activity_router,
+    analytics_router,
 ]
 
 # No session; the share token in the URL is the credential (see campaigns/public.py).

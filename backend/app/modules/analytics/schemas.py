@@ -1,0 +1,75 @@
+from datetime import date
+from typing import Literal
+
+from pydantic import BaseModel
+
+Range = Literal["7d", "30d", "90d", "12m", "all"]
+Unit = Literal["day", "week", "month"]
+
+
+class Period(BaseModel):
+    range: Range
+    unit: Unit
+    start: date
+    end: date
+    buckets: list[date]  # first day of every bucket, oldest first
+
+
+class Kpis(BaseModel):
+    people: int  # unique across the selected bots
+    subscriptions: int  # sum over bots (a person on two bots counts twice)
+    multi_bot_people: int  # on two or more of the selected bots
+    new_people: int | None  # joined in the period (None: no bot has "Joined at" mapped)
+    new_people_previous: int | None  # same length, just before
+    blocked: int  # learned while sending, in the period
+
+
+class GrowthPoint(BaseModel):
+    t: date
+    bot_id: int
+    count: int
+
+
+class Growth(BaseModel):
+    points: list[GrowthPoint]
+    before_start: dict[int, int]  # per bot: people who joined before the period
+    missing_joined_at: list[int]  # bots without "Joined at" mapped
+
+
+class OverlapPair(BaseModel):
+    a: int
+    b: int
+    people: int
+
+
+class Overlap(BaseModel):
+    by_bot_count: dict[int, int]  # number of bots -> people on exactly that many
+    pairs: list[OverlapPair]
+    per_bot: dict[int, int]  # reachable people per bot
+
+
+class LanguageCount(BaseModel):
+    code: str
+    people: int
+
+
+class Languages(BaseModel):
+    items: list[LanguageCount]
+    unknown: int  # people with no language recorded
+    missing_language: list[int]  # bots without "Language" mapped
+
+
+class BlockedPoint(BaseModel):
+    t: date
+    count: int
+
+
+class AudienceAnalytics(BaseModel):
+    period: Period
+    bots: list[int]
+    kpis: Kpis
+    growth: Growth
+    overlap: Overlap
+    languages: Languages
+    blocked: list[BlockedPoint]
+    errors: dict[int, str]  # bots whose database couldn't be read
