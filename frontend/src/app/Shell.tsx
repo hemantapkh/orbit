@@ -36,7 +36,7 @@ export function Shell() {
     // Desktop: the window never scrolls, only <main> does, so the sidebar and any sticky
     // bars inside main can't drift. Phones keep normal page scrolling.
     <div className="min-h-screen md:grid md:h-dvh md:grid-cols-[232px_minmax(0,1fr)] md:overflow-hidden">
-      <aside className="bg-panel text-panel-ink md:flex md:h-dvh md:flex-col md:overflow-y-auto md:overscroll-contain">
+      <aside className="bg-panel text-panel-ink md:flex md:h-dvh md:flex-col md:overflow-y-auto md:overscroll-none">
         <div className="flex items-center justify-between px-5 py-4 md:py-6">
           <OrbitLogo tone="inverse" size={26} />
         </div>
@@ -72,7 +72,7 @@ export function Shell() {
           </button>
         </div>
       </aside>
-      <main ref={mainRef} className="md:h-dvh md:overflow-y-auto md:overscroll-contain">
+      <main ref={mainRef} className="md:h-dvh md:overflow-y-auto md:overscroll-none">
         <div className="mx-auto w-full max-w-[1120px] px-4 py-8 sm:px-8 md:py-12">
           <ErrorBoundary>
             <Outlet />

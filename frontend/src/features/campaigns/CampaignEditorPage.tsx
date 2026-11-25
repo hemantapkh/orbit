@@ -284,7 +284,9 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
         </aside>
       </div>
 
-      <div className="sticky bottom-0 z-10 -mx-4 mt-10 border-t border-line bg-canvas/95 px-4 py-4 backdrop-blur sm:-mx-8 sm:px-8">
+      {/* Pinned to the bottom edge; the negative bottom margin cancels the page padding so
+          the bar never lifts off the edge at the end of the page. */}
+      <div className="sticky bottom-0 z-10 -mx-4 mt-10 -mb-8 border-t border-line bg-canvas/95 px-4 py-4 backdrop-blur sm:-mx-8 sm:px-8 md:-mb-12">
         {save.error && <div className="mb-3"><Notice>{save.error.message}</Notice></div>}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-sm text-ink-faint">{savedAt ? `Saved ${savedAt.toLocaleTimeString()}` : "Not saved yet"}</span>
