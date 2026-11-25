@@ -34,7 +34,7 @@ single small instance. Postgres is recommended for anything real.
 | `ORBIT_SECRET_KEY` | **Yes** | Long random string. Encrypts bot tokens and database URLs, signs sessions. **Never change it once bots are connected.** Generate with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`. |
 | `ORBIT_DATABASE_URL` | Recommended | Orbit's own database, e.g. `postgresql://user:pass@host:5432/orbit`. |
 | `ORBIT_COOKIE_SECURE` | Behind HTTPS | Set to `true` so the session cookie is HTTPS-only. |
-| `ORBIT_BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | First start | Creates the first operator when none exists; ignored afterwards. Or run `python -m app.cli create-admin you@example.com` in the container. |
+| `ORBIT_BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | First start | Creates the first account, as owner of a first organization, when none exists; ignored afterwards. Everyone else joins by invite link. Or run `python -m app.cli create-admin you@example.com` in the container. |
 | `ORBIT_RUN_WORKER_IN_API` | No | `true` (default) sends broadcasts from the API process. Set `false` and run `python -m app.worker` as a separate container to keep sending through API restarts. |
 | `ORBIT_SEND_RATE_PER_BOT` | No | Messages per second per bot. Default 25 (Telegram allows about 30). |
 

@@ -57,7 +57,10 @@ Your bots don't change, and Orbit never writes to their databases.
 - **Share a read-only link** to a broadcast's live results, with no sign-in for viewers and
   never anyone's personal details.
 
-**For the people running it**
+**For teams**
+- **Organizations**: separate spaces with their own bots, broadcasts and members.
+- **Roles**: owner, admin, sender and viewer, so people get exactly the access they need.
+- Invite people with a one-time link; they choose their own password.
 - An activity log of who did what.
 - One Docker image, Postgres or SQLite, and migrations that run themselves.
 
