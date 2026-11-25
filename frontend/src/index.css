@@ -1,0 +1,87 @@
+@import "tailwindcss";
+@import "@fontsource-variable/schibsted-grotesk";
+
+/* Orbit design tokens. Brand colours match public/brand/*.svg; see docs/brand.md. */
+@theme {
+  --font-sans: "Schibsted Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: #f3f5f3;
+  --color-surface: #ffffff;
+  --color-ink: #131a18;
+  --color-ink-soft: #4a5752;
+  --color-ink-faint: #7d8a85;
+  --color-line: #e2e7e3;
+  --color-line-strong: #c9d1cc;
+
+  --color-panel: #17332c;
+  --color-panel-deep: #10261f;
+  --color-panel-ink: #dfe8e3;
+  --color-panel-muted: #93a8a0;
+
+  --color-accent: #c0912f;
+  --color-accent-deep: #8a681d;
+  --color-accent-wash: #f3ead3;
+
+  --color-status-ok: #2f9a5e;
+  --color-status-busy: #d98e1f;
+  --color-status-error: #c8483a;
+  --color-status-info: #4f6fae;
+  --color-status-off: #a9b3ae;
+}
+
+:root {
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  font-feature-settings: "tnum" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--color-canvas);
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/* Fields draw their own focus ring; no second outline on top of it. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%237d8a85' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  padding-right: 2.25rem !important;
+}
+
+@keyframes status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 0%, transparent); }
+}
+
+.status-live { animation: status-pulse 1.6s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .status-live { animation: none; }
+  * { transition-duration: 0ms !important; }
+}
+
+/* Loading: the satellite orbits the core. */
+@keyframes orbit-travel {
+  to { transform: rotate(360deg); }
+}
+.orbit-spin .orbit-node {
+  transform-origin: 16px 16px;
+  animation: orbit-travel 1.6s cubic-bezier(0.55, 0.1, 0.45, 0.9) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-spin .orbit-node { animation: none; }
+}

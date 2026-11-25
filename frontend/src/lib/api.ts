@@ -1,0 +1,253 @@
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function describe(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail) && detail.length) {
+    const first = detail[0] as { msg?: string; loc?: unknown[] };
+    const field = first.loc?.slice(1).join(".");
+    return field ? `${field}: ${first.msg}` : (first.msg ?? "Invalid input");
+  }
+  return "Something went wrong";
+}
+
+export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
+  const { json, headers, ...rest } = init;
+  const res = await fetch(`/api${path}`, {
+    credentials: "same-origin",
+    ...rest,
+    headers: json !== undefined ? { "Content-Type": "application/json", ...headers } : headers,
+    body: json !== undefined ? JSON.stringify(json) : rest.body,
+  });
+  if (res.status === 204) return undefined as T;
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, describe(body.detail));
+  return body as T;
+}
+
+// ---- types mirrored from the FastAPI schemas -------------------------------------
+
+export type Admin = { id: number; email: string; name: string };
+
+export type SubscriberCounts = {
+  active: number;
+  blocked: number;
+  unsubscribed: number;
+  unreachable: number;
+  total: number;
+  source: "integration" | "database";
+  /** Set when the bot's database couldn't be read; counts are then the last cached ones. */
+  source_error: string | null;
+};
+
+export type Bot = {
+  id: number;
+  telegram_id: number;
+  username: string;
+  display_name: string;
+  description: string;
+  is_active: boolean;
+  token_valid: boolean;
+  api_key_prefix: string;
+  last_checked_at: string | null;
+  last_ingest_at: string | null;
+  created_at: string;
+  subscribers: SubscriberCounts;
+};
+
+export type BotWithKey = Bot & { api_key: string };
+
+export type MessageButton = { text: string; url: string };
+
+export type MessageContent = {
+  text: string;
+  parse_mode: "HTML" | "MarkdownV2" | null;
+  media_id: number | null;
+  buttons: MessageButton[];
+  disable_link_preview: boolean;
+  silent: boolean;
+  protect_content: boolean;
+};
+
+export type CampaignStatus =
+  | "draft"
+  | "scheduled"
+  | "running"
+  | "paused"
+  | "completed"
+  | "cancelled";
+
+export type DeliveryStats = {
+  pending: number;
+  sent: number;
+  failed: number;
+  blocked: number;
+  skipped: number;
+  total: number;
+};
+
+export type Recipient = { bot_id: number; chat_id: number; label: string };
+export type Audience = { mode: "all" | "selected"; recipients: Recipient[] };
+
+export type Campaign = {
+  id: number;
+  name: string;
+  status: CampaignStatus;
+  message: MessageContent;
+  bot_ids: number[];
+  audience: Audience;
+  source_campaign_id: number | null;
+  scheduled_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+  stats: DeliveryStats;
+};
+
+export type CampaignBotStats = {
+  bot_id: number;
+  username: string;
+  display_name: string;
+  audience: number;
+  stats: DeliveryStats;
+  error: string | null;
+};
+
+export type RelatedSend = {
+  id: number;
+  name: string;
+  status: CampaignStatus;
+  created_at: string;
+  started_at: string | null;
+  audience_mode: "all" | "selected";
+  bot_ids: number[];
+  stats: DeliveryStats;
+};
+
+export type CampaignDetail = Campaign & { bots: CampaignBotStats[]; sends: RelatedSend[] };
+
+export type Person = {
+  chat_id: number;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  reachable: boolean;
+};
+
+export type ActivityEntry = {
+  id: number;
+  actor_email: string | null;
+  action: string;
+  entity_type: "bot" | "campaign";
+  entity_id: number | null;
+  details: Record<string, unknown>;
+  created_at: string;
+};
+
+export type Page<T> = { items: T[]; total: number };
+
+export type Delivery = {
+  id: number;
+  bot_id: number;
+  chat_id: number;
+  status: "pending" | "sent" | "failed" | "blocked" | "skipped";
+  attempts: number;
+  error: string | null;
+  sent_at: string | null;
+};
+
+export type Media = {
+  id: number;
+  kind: "photo" | "video" | "document" | "animation";
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+};
+
+export type Overview = {
+  bots: (SubscriberCounts & {
+    id: number;
+    username: string;
+    display_name: string;
+    is_active: boolean;
+    token_valid: boolean;
+  })[];
+  total_bots: number;
+  total_active_subscribers: number;
+  unique_people: number;
+  recent_campaigns: Pick<
+    Campaign,
+    "id" | "name" | "status" | "scheduled_at" | "started_at" | "finished_at" | "stats"
+  >[];
+};
+
+export const emptyMessage = (): MessageContent => ({
+  text: "",
+  parse_mode: "HTML",
+  media_id: null,
+  buttons: [],
+  disable_link_preview: false,
+  silent: false,
+  protect_content: false,
+});
+
+// ---- subscriber sources --------------------------------------------------------------
+
+export type MappedField =
+  | "chat_id"
+  | "username"
+  | "first_name"
+  | "last_name"
+  | "language_code"
+  | "joined_at"
+  | "is_active";
+
+export type ColumnMap = { chat_id: string } & Partial<Record<Exclude<MappedField, "chat_id">, string | null>>;
+
+export type FilterOp = "eq" | "neq" | "is_null" | "not_null" | "is_true" | "is_false";
+export type SourceFilter = { column: string; op: FilterOp; value?: string | null };
+
+export type BotSourceInfo = {
+  kind: "integration" | "database";
+  driver: string | null;
+  host: string | null;
+  database: string | null;
+  schema: string | null;
+  table: string | null;
+  column_map: Partial<ColumnMap>;
+  filters: SourceFilter[];
+  status: "healthy" | "error" | "unchecked" | null;
+  last_error: string | null;
+  last_checked_at: string | null;
+  cached_count: number | null;
+  cached_count_at: string | null;
+};
+
+export type ConnectionInfo = {
+  ok: boolean;
+  driver: string;
+  host: string | null;
+  database: string | null;
+  server_version: string | null;
+};
+
+export type ColumnInfo = { name: string; type: string; nullable: boolean };
+
+export type TableInfo = {
+  schema: string | null;
+  name: string;
+  kind: "table" | "view";
+  row_estimate: number | null;
+  columns: ColumnInfo[];
+  suggested: Partial<Record<MappedField, string>>;
+};
+
+export type Introspection = { connection: ConnectionInfo; tables: TableInfo[] };
+
+export type SourcePreview = { rows: Record<string, unknown>[]; total: number; warnings: string[] };
