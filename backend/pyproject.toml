@@ -5,6 +5,7 @@ description = "Orbit: everything connected, one place. Backend API."
 authors = [
     { name = "Hemanta Pokharel", email = "git@hemantapkh.com" }
 ]
+license = "AGPL-3.0-only"
 requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
