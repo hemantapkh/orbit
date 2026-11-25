@@ -151,7 +151,7 @@ export function CampaignDetailPage() {
           </Panel>
 
           <section>
-            <h2 className="mb-3 font-semibold">By bot</h2>
+            <h2 className="mb-3 text-lg font-semibold">By bot</h2>
             <Panel className="overflow-x-auto">
               <table className="w-full min-w-[560px] text-left text-[15px]">
                 <thead className="border-b border-line text-sm text-ink-soft">
@@ -276,7 +276,7 @@ function Sends({ current, sends, bots }: { current: number; sends: RelatedSend[]
   const name = (id: number) => bots.find((b) => b.bot_id === id)?.username ?? `bot ${id}`;
   return (
     <section>
-      <h2 className="mb-3 font-semibold">Every send of this message</h2>
+      <h2 className="mb-3 text-lg font-semibold">Every send of this message</h2>
       <Panel className="divide-y divide-line">
         {sends.map((x, i) => (
           <Link

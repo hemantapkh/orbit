@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { api, type ActivityEntry } from "../../lib/api";
 import { ago, when } from "../../lib/format";
 import { Panel } from "../../components/ui";
@@ -34,19 +35,30 @@ function describe(e: ActivityEntry): string {
   }
 }
 
-export function ActivityList({ entityType, entityId }: { entityType: "bot" | "campaign"; entityId: number }) {
+export function ActivityList({
+  entityType,
+  entityId,
+  initial = 30,
+}: {
+  entityType: "bot" | "campaign";
+  entityId: number;
+  /** entries shown before "Show all" */
+  initial?: number;
+}) {
+  const [all, setAll] = useState(false);
   const q = useQuery({
     queryKey: ["activity", entityType, entityId],
     queryFn: () => api<ActivityEntry[]>(`/activity?entity_type=${entityType}&entity_id=${entityId}&limit=30`),
     refetchInterval: 10_000,
   });
   if (!q.data?.length) return null;
+  const shown = all ? q.data : q.data.slice(0, initial);
   return (
     <section>
-      <h2 className="mb-3 font-semibold">Activity</h2>
+      <h2 className="mb-3 text-lg font-semibold">Activity</h2>
       <Panel className="px-5 py-2">
         <ol className="divide-y divide-line text-sm">
-          {q.data.map((e) => (
+          {shown.map((e) => (
             <li key={e.id} className="flex items-baseline justify-between gap-4 py-2.5">
               <span className="min-w-0">
                 <span className={e.actor_email ? "font-medium" : "text-ink-soft"}>{e.actor_email ?? "Orbit"}</span>{" "}
@@ -59,6 +71,11 @@ export function ActivityList({ entityType, entityId }: { entityType: "bot" | "ca
           ))}
         </ol>
       </Panel>
+      {q.data.length > shown.length && (
+        <button type="button" onClick={() => setAll(true)} className="mt-2 text-sm text-ink-soft underline-offset-4 hover:text-ink hover:underline">
+          Show all activity
+        </button>
+      )}
     </section>
   );
 }

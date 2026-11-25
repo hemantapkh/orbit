@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api, type Bot } from "../../lib/api";
 import { ago, fmt, when } from "../../lib/format";
-import { Button, buttonClass, Dialog, Field, Input, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
-import { BotStatus } from "./BotsPage";
+import { Button, Dialog, Field, Input, Notice, Panel, Skeleton } from "../../components/ui";
 import { ActivityList } from "../activity/ActivityList";
 import { SourcePanel } from "../sources/SourcePanel";
+import { BotStatus } from "./BotsPage";
 
 export function BotDetailPage() {
   const { botId } = useParams();
@@ -46,109 +46,93 @@ export function BotDetailPage() {
   const s = b.subscribers;
 
   return (
-    <>
-      <Link to="/bots" className="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-soft hover:text-ink">
+    <div className="max-w-[880px]">
+      <Link to="/bots" className="mb-5 inline-flex items-center gap-1.5 text-sm text-ink-soft hover:text-ink">
         <ArrowLeft size={15} /> Bots
       </Link>
-      <PageHeader
-        title={
-          <span className="flex items-center gap-3">
-            <BotStatus bot={b} />
-            {b.display_name}
-          </span>
-        }
-        lede={
-          <>
-            <a href={`https://t.me/${b.username}`} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
-              @{b.username}
-            </a>
-            {b.description && <> — {b.description}</>}
-          </>
-        }
-        actions={
-          <>
-            <Button onClick={() => refresh.mutate()} disabled={refresh.isPending}>
-              {refresh.isPending ? "Checking…" : "Check token"}
-            </Button>
-            {b.is_active && b.token_valid ? (
-              <Link to={`/broadcasts/new?bot=${b.id}`} className={buttonClass("primary")}>
-                Broadcast to this bot
-              </Link>
-            ) : (
-              <Button variant="primary" disabled>Broadcast to this bot</Button>
-            )}
-          </>
-        }
-      />
-      {error && <div className="mb-6"><Notice>{error.message}</Notice></div>}
-      {!b.token_valid && (
-        <div className="mb-6">
+
+      <header className="mb-8">
+        <h1 className="flex items-center gap-3 text-[28px] leading-tight font-semibold tracking-[-0.015em]">
+          <BotStatus bot={b} />
+          {b.display_name}
+          {!b.is_active && <span className="rounded-md bg-line px-2 py-0.5 text-sm font-medium text-ink-soft">Disabled</span>}
+        </h1>
+        <p className="mt-1.5 text-sm text-ink-soft">
+          <a href={`https://t.me/${b.username}`} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
+            @{b.username}
+          </a>
+          <span className="text-ink-faint"> · ID {b.telegram_id} · added {when(b.created_at)}</span>
+        </p>
+        {b.description && <p className="mt-2 max-w-[62ch] text-ink-soft">{b.description}</p>}
+      </header>
+
+      <div className="space-y-8">
+        {error && <Notice>{error.message}</Notice>}
+        {!b.token_valid && (
           <Notice>
-            Telegram rejected this bot's token the last time it was checked. Broadcasts can't go out
-            until you replace it.
+            Telegram rejected this bot's token the last time it was checked, so it can't send. Replace
+            the token in Settings below.
           </Notice>
-        </div>
-      )}
+        )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="space-y-6">
-          <Panel className="p-6">
-            <h2 className="mb-5 font-semibold">Subscribers</h2>
-            <dl className="grid grid-cols-3 gap-6">
-              <Count label="Active" value={s.active} strong />
-              <Count label="Blocked the bot" value={s.blocked} />
-              <Count label="Unreachable" value={s.unreachable} />
-            </dl>
-            {s.source_error && (
-              <div className="mt-6">
-                <Notice>
-                  Couldn't read the bot's database: {s.source_error}. These are the last known counts.
-                </Notice>
+        <section aria-labelledby="audience">
+          <h2 id="audience" className="mb-3 text-lg font-semibold">Audience</h2>
+          <Panel>
+            <div className="flex flex-wrap items-end gap-x-10 gap-y-4 px-6 pt-6 pb-5">
+              <div>
+                <p className="text-[40px] leading-none font-semibold tracking-[-0.03em]">{fmt(s.active)}</p>
+                <p className="mt-2 text-sm text-ink-soft">
+                  {s.source_error ? "can receive broadcasts (last known)" : "can receive broadcasts"}
+                </p>
               </div>
-            )}
-            <p className="mt-6 text-sm text-ink-faint">
-              {s.connected
-                ? "Counted live from the bot's database, refreshed about once a minute."
-                : "Connect the bot's database below to see who it can reach."}{" "}
-              Blocked and unreachable counts are learned during broadcasts.
-            </p>
+              <dl className="flex gap-8 pb-0.5 text-sm">
+                <Small label="Blocked the bot" value={s.blocked} />
+                <Small label="Unreachable" value={s.unreachable} />
+              </dl>
+            </div>
+            <div className="border-t border-line px-6 py-5">
+              <SourcePanel bot={b} />
+            </div>
           </Panel>
+        </section>
 
-        </div>
-
-        <aside className="space-y-6">
-          <Panel className="divide-y divide-line text-sm">
-            <Row k="Telegram ID" v={String(b.telegram_id)} />
-            <Row k="Connected" v={when(b.created_at)} />
-            <Row k="Token checked" v={ago(b.last_checked_at)} />
+        <section aria-labelledby="settings">
+          <h2 id="settings" className="mb-3 text-lg font-semibold">Settings</h2>
+          <Panel className="divide-y divide-line">
+            <Setting
+              title="Token"
+              body={b.token_valid ? `Accepted by Telegram, checked ${ago(b.last_checked_at)}` : "Rejected by Telegram"}
+            >
+              <Button size="sm" variant="ghost" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+                {refresh.isPending ? "Checking…" : "Check now"}
+              </Button>
+              <Button size="sm" onClick={() => setTokenOpen(true)}>Replace</Button>
+            </Setting>
+            <Setting
+              title={b.is_active ? "Enabled" : "Disabled"}
+              body={b.is_active ? "Included in broadcasts." : "Left out of broadcasts. Nothing is deleted."}
+            >
+              <Button size="sm" onClick={() => toggle.mutate(!b.is_active)} disabled={toggle.isPending}>
+                {b.is_active ? "Disable" : "Enable"}
+              </Button>
+            </Setting>
+            <Setting title="Remove bot" body="Only before it has sent a broadcast. After that, disable it instead.">
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={() => confirm(`Remove @${b.username} from Orbit?`) && remove.mutate()}
+              >
+                Remove
+              </Button>
+            </Setting>
           </Panel>
-          <Panel className="space-y-4 p-5">
-            <Setting
-              title={b.is_active ? "Disable bot" : "Enable bot"}
-              body={b.is_active ? "Stops broadcasts and subscriber reports for this bot. Nothing is deleted." : "Resume broadcasts and subscriber reports."}
-              action={<Button size="sm" onClick={() => toggle.mutate(!b.is_active)} disabled={toggle.isPending}>{b.is_active ? "Disable" : "Enable"}</Button>}
-            />
-            <Setting
-              title="Replace token"
-              body="Use after revoking the token in @BotFather."
-              action={<Button size="sm" onClick={() => setTokenOpen(true)}>Replace</Button>}
-            />
-            <Setting
-              title="Remove bot"
-              body="Only possible before it has sent a broadcast. Otherwise, disable it."
-              action={<Button size="sm" variant="danger" onClick={() => confirm(`Remove @${b.username} and its subscriber list?`) && remove.mutate()}>Remove</Button>}
-            />
-          </Panel>
-        </aside>
-      </div>
+        </section>
 
-      <div className="mt-6 space-y-6">
-        <SourcePanel bot={b} />
-        <ActivityList entityType="bot" entityId={b.id} />
+        <ActivityList entityType="bot" entityId={b.id} initial={5} />
       </div>
 
       <ReplaceTokenDialog open={tokenOpen} onClose={() => setTokenOpen(false)} botId={b.id} onDone={done} />
-    </>
+    </div>
   );
 }
 
@@ -172,7 +156,7 @@ function ReplaceTokenDialog({ open, onClose, botId, onDone }: { open: boolean; o
         className="space-y-5"
       >
         {save.error && <Notice>{save.error.message}</Notice>}
-        <Field label="New token" htmlFor="newtoken" hint="It must belong to the same bot.">
+        <Field label="New token" htmlFor="newtoken" hint="From @BotFather, after revoking the old one. It must belong to the same bot.">
           <Input id="newtoken" required autoFocus autoComplete="off" className="font-mono text-sm" value={token} onChange={(e) => setToken(e.target.value)} />
         </Field>
         <div className="flex justify-end gap-2">
@@ -184,32 +168,23 @@ function ReplaceTokenDialog({ open, onClose, botId, onDone }: { open: boolean; o
   );
 }
 
-function Count({ label, value, strong }: { label: string; value: number; strong?: boolean }) {
+function Small({ label, value }: { label: string; value: number }) {
   return (
     <div>
-      <dt className="text-sm text-ink-soft">{label}</dt>
-      <dd className={strong ? "mt-1 text-3xl font-semibold tracking-tight" : "mt-1 text-3xl text-ink-soft"}>{fmt(value)}</dd>
+      <dt className="text-ink-faint">{label}</dt>
+      <dd className="mt-0.5 text-lg font-semibold text-ink-soft">{fmt(value)}</dd>
     </div>
   );
 }
 
-function Row({ k, v }: { k: string; v: string }) {
+function Setting({ title, body, children }: { title: string; body: string; children: ReactNode }) {
   return (
-    <div className="flex justify-between gap-4 px-5 py-3">
-      <span className="text-ink-soft">{k}</span>
-      <span>{v}</span>
-    </div>
-  );
-}
-
-function Setting({ title, body, action }: { title: string; body: string; action: React.ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
+    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-4">
+      <div className="min-w-0">
         <p className="font-medium">{title}</p>
         <p className="text-sm text-ink-faint">{body}</p>
       </div>
-      <div className="shrink-0">{action}</div>
+      <div className="flex shrink-0 gap-2">{children}</div>
     </div>
   );
 }

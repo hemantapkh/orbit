@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { api, type Bot, type BotSourceInfo, type ConnectionInfo } from "../../lib/api";
-import { ago, fmt } from "../../lib/format";
-import { Button, Field, Input, Notice, Panel, Skeleton, StatusDot } from "../../components/ui";
+import { ago } from "../../lib/format";
+import { Button, Field, Input, Notice, Skeleton, StatusDot } from "../../components/ui";
 import { DatabaseSetup } from "./DatabaseSetup";
 
 type Mode = "view" | "setup" | "mapping" | "connection";
@@ -38,13 +38,7 @@ export function SourcePanel({ bot }: { bot: Bot }) {
   const connected = s.kind === "database";
 
   return (
-    <Panel className="p-6">
-      <div className="mb-5">
-        <h2 className="font-semibold">Bot database</h2>
-        <p className="text-sm text-ink-soft">
-          Orbit reads who this bot can reach from its own database, read-only, live.
-        </p>
-      </div>
+    <div>
       {disconnect.error && <div className="mb-4"><Notice>{disconnect.error.message}</Notice></div>}
 
       {mode === "setup" || mode === "mapping" ? (
@@ -68,15 +62,15 @@ export function SourcePanel({ bot }: { bot: Bot }) {
           }
         />
       ) : (
-        <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong px-5 py-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <p className="max-w-[56ch] text-sm text-ink-soft">
-            No database connected yet. Connect the bot's Postgres database and pick the table where it
-            stores its users. Nothing is copied; Orbit reads it when it needs to.
+            Connect the bot's Postgres database and pick the table where it keeps its users. Orbit reads
+            it live and read-only; nothing is copied.
           </p>
           <Button variant="primary" onClick={() => setMode("setup")}>Connect database</Button>
         </div>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -94,26 +88,28 @@ function Summary({
   const healthy = s.status !== "error";
   const where = [s.schema, s.table].filter(Boolean).join(".") + (s.joins?.length ? ` + ${s.joins.map((j) => j.table).join(", ")}` : "");
   return (
-    <div className="space-y-4">
-      <p className="flex items-center gap-3">
-        <StatusDot color={healthy ? "green" : "red"} label={healthy ? "Connected" : "Can't read the database"} />
-        <span>
-          Source: {s.driver} · <span className="font-medium">{where}</span> ·{" "}
-          <span className="font-semibold">{fmt(s.cached_count ?? 0)}</span> users
-        </span>
-      </p>
-      {!healthy && s.last_error && (
-        <Notice>{s.last_error}. Counts show the last successful read until this is fixed.</Notice>
-      )}
-      <p className="text-sm text-ink-faint">
-        {s.host ? `${s.host} / ${s.database}` : s.database}. Counts refresh about once a minute, and each
-        broadcast reads the list at send time. Checked {ago(s.last_checked_at)}.
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={onEditMapping}>Edit mapping</Button>
-        <Button size="sm" onClick={onChangeConnection}>Change connection</Button>
-        <Button size="sm" variant="ghost" onClick={onDisconnect}>Disconnect</Button>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="pt-1.5">
+            <StatusDot color={healthy ? "green" : "red"} label={healthy ? "Database connected" : "Can't read the database"} />
+          </span>
+          <div className="min-w-0 text-sm">
+            <p className="truncate">
+              <span className="text-ink-soft">{s.driver}</span> <span className="font-medium">{where}</span>
+            </p>
+            <p className="truncate text-ink-faint">
+              {s.host ? `${s.host} / ${s.database}` : s.database} · read {ago(s.last_checked_at)}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-1">
+          <Button size="sm" variant="ghost" onClick={onEditMapping}>Edit mapping</Button>
+          <Button size="sm" variant="ghost" onClick={onChangeConnection}>Change connection</Button>
+          <Button size="sm" variant="ghost" onClick={onDisconnect}>Disconnect</Button>
+        </div>
       </div>
+      {!healthy && s.last_error && <Notice>Couldn't read the bot's database: {s.last_error}.</Notice>}
     </div>
   );
 }
