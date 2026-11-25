@@ -266,3 +266,9 @@ export type TableInfo = {
 export type Introspection = { connection: ConnectionInfo; tables: TableInfo[] };
 
 export type SourcePreview = { rows: Record<string, unknown>[]; total: number; warnings: string[] };
+
+// ---- test groups ---------------------------------------------------------------------
+
+export type TestMember = { bot_id: number; chat_id: number; label: string; kind: string };
+export type TestGroup = { id: number; name: string; members: TestMember[]; is_default: boolean; updated_at: string };
+export type TestSendResult = { bot_id: number; chat_id: number; label: string; delivered: boolean; error: string | null };

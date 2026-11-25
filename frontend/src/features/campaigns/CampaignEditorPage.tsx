@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Bold, Code, Italic, Link2, Paperclip, Plus, Strikethrough, Trash2, Underline } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   api,
@@ -11,9 +11,11 @@ import {
   type Media,
   type MessageContent,
   type ParseMode,
+  type TestGroup,
+  type TestSendResult,
 } from "../../lib/api";
 import { fmt, toLocalInput, when } from "../../lib/format";
-import { Button, cx, Dialog, fieldClass, Field, Input, Notice, PageHeader, Panel, Skeleton, Textarea } from "../../components/ui";
+import { Button, buttonClass, cx, Dialog, fieldClass, StatusDot, Field, Input, Notice, PageHeader, Panel, Skeleton, Textarea } from "../../components/ui";
 import { MessagePreview } from "./MessagePreview";
 import { PeoplePicker } from "./PeoplePicker";
 
@@ -49,6 +51,21 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
   const [audience, setAudience] = useState<Audience>(initial?.audience ?? { mode: "all", recipients: [] });
   const [launching, setLaunching] = useState<"now" | "schedule" | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+
+  const testGroups = useQuery({ queryKey: ["test-groups"], queryFn: () => api<TestGroup[]>("/test-groups") });
+  const [pickedGroup, setPickedGroup] = useState<number | null>(null);
+  const testGroupId =
+    (pickedGroup && testGroups.data?.some((g) => g.id === pickedGroup) ? pickedGroup : null) ??
+    testGroups.data?.find((g) => g.is_default)?.id ??
+    testGroups.data?.[0]?.id ??
+    null;
+  const sendTest = useMutation({
+    mutationFn: () =>
+      api<TestSendResult[]>(`/test-groups/${testGroupId}/send`, {
+        method: "POST",
+        json: { message, campaign_id: id },
+      }),
+  });
 
   const media = useQuery({
     queryKey: ["media", message.media_id],
@@ -240,7 +257,14 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
 
         <aside className="space-y-6 lg:sticky lg:top-8 lg:self-start">
           <MessagePreview message={message} media={media.data ?? null} botName={selected[0] ? `@${selected[0].username}` : undefined} />
-          <TestSend bots={selected.length ? selected : usable} message={message} disabled={isEmpty || tooLong} />
+          <TestPanel
+            groups={testGroups.data}
+            groupId={testGroupId}
+            onGroup={setPickedGroup}
+            results={sendTest.data}
+            error={sendTest.error}
+            bots={bots}
+          />
         </aside>
       </div>
 
@@ -252,6 +276,19 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
             <Button onClick={() => save.mutate()} disabled={save.isPending}>
               {save.isPending ? "Saving…" : "Save draft"}
             </Button>
+            {testGroupId ? (
+              <Button
+                onClick={() => sendTest.mutate()}
+                disabled={isEmpty || tooLong || sendTest.isPending}
+                title={`Send to ${testGroups.data?.find((g) => g.id === testGroupId)?.name}`}
+              >
+                {sendTest.isPending ? "Sending test…" : "Send test"}
+              </Button>
+            ) : (
+              <Link to="/broadcasts/test-groups" className={buttonClass("secondary")}>
+                Set up a test group
+              </Link>
+            )}
             <Button disabled={!botIds.length || isEmpty || tooLong || (picking && !recipients.length)} onClick={() => setLaunching("schedule")}>
               {editingScheduled ? "Change schedule" : "Schedule"}
             </Button>
@@ -435,55 +472,63 @@ function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange
   );
 }
 
-const TEST_CHAT_KEY = "orbit.testChatId";
-
-function TestSend({ bots, message, disabled }: { bots: Bot[]; message: MessageContent; disabled: boolean }) {
-  const [botId, setBotId] = useState<number | null>(bots[0]?.id ?? null);
-  const [chatId, setChatId] = useState(() => {
-    try {
-      return localStorage.getItem(TEST_CHAT_KEY) ?? "";
-    } catch {
-      return "";
-    }
-  });
-  useEffect(() => {
-    if (!bots.some((b) => b.id === botId)) setBotId(bots[0]?.id ?? null);
-  }, [bots, botId]);
-
-  const send = useMutation({
-    mutationFn: () => {
-      try {
-        localStorage.setItem(TEST_CHAT_KEY, chatId);
-      } catch {
-        /* storage unavailable */
-      }
-      return api(`/campaigns/test-send`, { method: "POST", json: { bot_id: botId, chat_id: Number(chatId), message } });
-    },
-  });
-
-  if (!bots.length) return null;
+function TestPanel({
+  groups,
+  groupId,
+  onGroup,
+  results,
+  error,
+  bots,
+}: {
+  groups: TestGroup[] | undefined;
+  groupId: number | null;
+  onGroup: (id: number) => void;
+  results: TestSendResult[] | undefined;
+  error: Error | null;
+  bots: Bot[];
+}) {
+  const botName = (id: number) => bots.find((b) => b.id === id)?.username ?? `bot ${id}`;
   return (
     <Panel className="space-y-3 p-4">
-      <h2 className="font-semibold">Send a test</h2>
-      <p className="text-sm text-ink-soft">Deliver this message to one chat, usually your own, before it goes to everyone.</p>
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
-        <select
-          aria-label="Bot to send from"
-          className={`${fieldClass} h-10`}
-          value={botId ?? ""}
-          onChange={(e) => setBotId(Number(e.target.value))}
-        >
-          {bots.map((b) => (
-            <option key={b.id} value={b.id}>@{b.username}</option>
-          ))}
-        </select>
-        <Input aria-label="Your Telegram user ID" placeholder="Your user ID" inputMode="numeric" value={chatId} onChange={(e) => setChatId(e.target.value.trim())} />
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="font-semibold">Test before sending</h2>
+        <Link to="/broadcasts/test-groups" className="text-sm text-ink-soft underline-offset-4 hover:text-ink hover:underline">
+          Manage
+        </Link>
       </div>
-      <Button className="w-full" onClick={() => send.mutate()} disabled={disabled || !botId || !/^-?\d+$/.test(chatId) || send.isPending}>
-        {send.isPending ? "Sending…" : "Send test"}
-      </Button>
-      {send.isSuccess && <Notice tone="info">Test sent. Check Telegram.</Notice>}
-      {send.error && <Notice>{send.error.message}</Notice>}
+      {!groups?.length ? (
+        <p className="text-sm text-ink-soft">
+          Create a test group with your own account (and any QA groups or channels), then use{" "}
+          <strong className="text-ink">Send test</strong> to see the message in Telegram first.
+        </p>
+      ) : (
+        <>
+          <select aria-label="Test group" className={`${fieldClass} h-10`} value={groupId ?? ""} onChange={(e) => onGroup(Number(e.target.value))}>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name} ({g.members.length})
+              </option>
+            ))}
+          </select>
+          <p className="text-sm text-ink-faint">Send test delivers the current message, even unsaved, to everyone in this group.</p>
+        </>
+      )}
+      {error && <Notice>{error.message}</Notice>}
+      {results && (
+        <ul className="divide-y divide-line rounded-lg border border-line text-sm" aria-label="Test results">
+          {results.map((r) => (
+            <li key={`${r.bot_id}:${r.chat_id}`} className="flex items-start gap-2.5 px-3 py-2">
+              <span className="pt-1.5"><StatusDot color={r.delivered ? "green" : "red"} /></span>
+              <span className="min-w-0">
+                <span className="block truncate">{r.label || r.chat_id}</span>
+                <span className={cx("block text-xs", r.delivered ? "text-ink-faint" : "text-status-error")}>
+                  {r.delivered ? `Delivered via @${botName(r.bot_id)}` : r.error}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </Panel>
   );
 }

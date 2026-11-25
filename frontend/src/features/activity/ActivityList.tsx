@@ -15,6 +15,7 @@ function describe(e: ActivityEntry): string {
     case "campaign.resumed": return "resumed sending";
     case "campaign.cancelled": return "stopped it";
     case "campaign.deleted": return "deleted it";
+    case "campaign.test_sent": return `sent a test to ${d.group} (${d.delivered} of ${d.total} delivered)`;
     case "campaign.started": return d.audience === "selected" ? "started sending to the selected people" : "started sending";
     case "campaign.completed": return "finished sending";
     case "bot.connected": return "connected the bot";

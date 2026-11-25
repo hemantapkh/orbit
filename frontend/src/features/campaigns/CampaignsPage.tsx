@@ -42,7 +42,12 @@ export function CampaignsPage() {
       <PageHeader
         title="Broadcasts"
         lede="One message, sent through any combination of your bots."
-        actions={<Link to="/broadcasts/new" className={buttonClass("primary")}>New broadcast</Link>}
+        actions={
+          <>
+            <Link to="/broadcasts/test-groups" className={buttonClass("secondary")}>Test groups</Link>
+            <Link to="/broadcasts/new" className={buttonClass("primary")}>New broadcast</Link>
+          </>
+        }
       />
       <div role="tablist" aria-label="Filter broadcasts" className="mb-5 flex gap-1 overflow-x-auto border-b border-line">
         {FILTERS.map((f, i) => (

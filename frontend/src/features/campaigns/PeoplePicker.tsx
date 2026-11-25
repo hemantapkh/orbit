@@ -14,10 +14,13 @@ export function PeoplePicker({
   bots,
   value,
   onChange,
+  showSelected = true,
 }: {
   bots: Bot[];
   value: Recipient[];
   onChange: (v: Recipient[]) => void;
+  /** false when the caller lists the picked people itself */
+  showSelected?: boolean;
 }) {
   const [botId, setBotId] = useState<number | null>(bots[0]?.id ?? null);
   const [q, setQ] = useState("");
@@ -93,7 +96,7 @@ export function PeoplePicker({
         </div>
       )}
 
-      {value.length > 0 ? (
+      {!showSelected ? null : value.length > 0 ? (
         <ul className="flex flex-wrap gap-2" aria-label="Selected people">
           {value.map((r) => (
             <li key={`${r.bot_id}:${r.chat_id}`} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface py-1 pr-1 pl-3 text-sm shadow-[0_1px_2px_rgba(23,33,30,0.04)]">

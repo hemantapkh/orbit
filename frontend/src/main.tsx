@@ -11,6 +11,7 @@ import { BotsPage } from "./features/bots/BotsPage";
 import { CampaignDetailPage } from "./features/campaigns/CampaignDetailPage";
 import { CampaignEditorPage } from "./features/campaigns/CampaignEditorPage";
 import { CampaignsPage } from "./features/campaigns/CampaignsPage";
+import { TestGroupsPage } from "./features/campaigns/TestGroupsPage";
 import { OverviewPage } from "./features/overview/OverviewPage";
 
 const queryClient = new QueryClient({
@@ -30,6 +31,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="bots/:botId" element={<BotDetailPage />} />
               <Route path="broadcasts" element={<CampaignsPage />} />
               <Route path="broadcasts/new" element={<CampaignEditorPage />} />
+              <Route path="broadcasts/test-groups" element={<TestGroupsPage />} />
               <Route path="broadcasts/:campaignId" element={<CampaignDetailPage />} />
               <Route path="broadcasts/:campaignId/edit" element={<CampaignEditorPage />} />
               <Route path="*" element={<NotFound />} />
