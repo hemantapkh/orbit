@@ -10,6 +10,7 @@ import { ActivityList } from "../activity/ActivityList";
 import { confirmDelete } from "./CampaignsPage";
 import { DeliveryBar } from "./DeliveryBar";
 import { ProgressInsights, StatusPanel } from "./Progress";
+import { withSamples } from "../../lib/personalize";
 import { MessagePreview } from "./MessagePreview";
 
 export function CampaignDetailPage() {
@@ -178,7 +179,7 @@ export function CampaignDetailPage() {
         <aside className="space-y-6 lg:sticky lg:top-8 lg:self-start">
           <section aria-label="Message">
             <h2 className="mb-3 text-lg font-semibold">Message</h2>
-            <MessagePreview message={c.message} media={media.data ?? null} />
+            <MessagePreview message={{ ...c.message, text: withSamples(c.message.text) }} media={media.data ?? null} />
           </section>
           <Panel className="divide-y divide-line text-sm">
             <Row k="Created" v={when(c.created_at)} />

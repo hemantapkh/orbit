@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Bold, Check, ChevronDown, X, Code, Italic, Link2, Paperclip, Plus, Strikethrough, Trash2, Underline } from "lucide-react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Bold, Check, ChevronDown, UserRound, X, Code, Italic, Link2, Paperclip, Plus, Strikethrough, Trash2, Underline } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useOrg } from "../../app/auth";
@@ -7,6 +7,7 @@ import {
   api,
   type Audience,
   type Bot,
+  type BotSourceInfo,
   type CampaignDetail,
   emptyMessage,
   type Media,
@@ -19,6 +20,7 @@ import {
 import { duration, fmt, toLocalInput, when } from "../../lib/format";
 import { Button, buttonClass, cx, Dialog, fieldClass, StatusDot, Field, Input, Notice, Panel, Skeleton, Textarea } from "../../components/ui";
 import { BotAvatar } from "../../components/BotAvatar";
+import { FIELDS, placeholdersIn, withSamples } from "../../lib/personalize";
 import { MessagePreview } from "./MessagePreview";
 import { PeoplePicker } from "./PeoplePicker";
 
@@ -236,6 +238,7 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
           <Section title="Message">
             <MediaPicker media={media.data ?? null} onChange={(m) => patch({ media_id: m?.id ?? null })} />
             <Composer value={message.text} onChange={(text) => patch({ text })} mode={message.parse_mode} />
+            <PersonalizationNotes text={message.text} bots={selected} />
             <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm">
               <label className="flex items-center gap-2 text-ink-soft">
                 Formatting
@@ -274,7 +277,10 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
           <ReachCard bots={selected} picked={picking ? recipients.length : null} />
           <section aria-label="Preview">
             <h2 className="mb-3 font-semibold">Preview</h2>
-            <MessagePreview message={message} media={media.data ?? null} />
+            <MessagePreview message={{ ...message, text: withSamples(message.text) }} media={media.data ?? null} />
+            {placeholdersIn(message.text).length > 0 && (
+              <p className="mt-2 text-xs text-ink-faint">Showing sample values. Each person sees their own.</p>
+            )}
           </section>
           {(sendTest.data || sendTest.error) && (
             <TestResults
@@ -421,15 +427,15 @@ function Composer({ value, onChange, mode }: { value: string; onChange: (v: stri
 
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-surface shadow-[0_1px_2px_rgba(23,33,30,0.04)] transition-[border-color,box-shadow] focus-within:border-accent focus-within:shadow-[0_0_0_4px_rgba(184,145,58,0.16)]">
-      {html && (
-        <div className="flex gap-0.5 border-b border-line px-1.5 py-1">
-          {tools.map(([Icon, label, fn]) => (
-            <button key={label} type="button" onClick={fn} title={label} aria-label={label} className="rounded p-1.5 text-ink-soft hover:bg-line/60 hover:text-ink">
-              <Icon size={16} />
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="flex items-center gap-0.5 border-b border-line px-1.5 py-1">
+        {tools.map(([Icon, label, fn]) => (
+          <button key={label} type="button" onClick={fn} title={label} aria-label={label} className="rounded p-1.5 text-ink-soft hover:bg-line/60 hover:text-ink">
+            <Icon size={16} />
+          </button>
+        ))}
+        {html && <span className="mx-1 h-5 w-px bg-line" aria-hidden />}
+        <PersonalizeMenu onPick={(token) => wrap(token, "")} />
+      </div>
       <Textarea
         ref={ref}
         rows={9}
@@ -675,5 +681,81 @@ function LaunchDialog({
         </div>
       </div>
     </Dialog>
+  );
+}
+
+/** Insert {first_name} etc. at the cursor. */
+function PersonalizeMenu({ onPick }: { onPick: (token: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        onBlur={(e) => !e.currentTarget.parentElement?.contains(e.relatedTarget) && setOpen(false)}
+        className="inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-sm text-ink-soft hover:bg-line/60 hover:text-ink"
+      >
+        <UserRound size={15} /> Personalize
+      </button>
+      {open && (
+        <div role="menu" className="absolute top-full left-0 z-20 mt-1 w-64 rounded-lg border border-line bg-surface py-1 text-sm shadow-[0_16px_40px_-16px_rgba(19,26,24,0.45)]">
+          {FIELDS.map((f) => (
+            <button
+              key={f.key}
+              role="menuitem"
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onPick(f.key === "first_name" ? "{first_name|there}" : `{${f.key}}`);
+                setOpen(false);
+              }}
+              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-canvas"
+            >
+              <span>{f.label}</span>
+              <code className="font-mono text-xs text-ink-faint">{f.key === "first_name" ? "{first_name|there}" : `{${f.key}}`}</code>
+            </button>
+          ))}
+          <p className="border-t border-line px-3 pt-2 pb-1.5 text-xs text-ink-faint">
+            Text after <code className="font-mono">|</code> is used when someone has no value, e.g. “Hi there”.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Which selected bots can't fill a placeholder, and what those people will see instead. */
+function PersonalizationNotes({ text, bots }: { text: string; bots: Bot[] }) {
+  const uses = placeholdersIn(text);
+  const sources = useQueries({
+    queries: uses.length
+      ? bots.map((b) => ({ queryKey: ["bots", String(b.id), "source"], queryFn: () => api<BotSourceInfo>(`/bots/${b.id}/source`), staleTime: 60_000 }))
+      : [],
+  });
+  if (!uses.length) return null;
+  const notes: string[] = [];
+  bots.forEach((b, i) => {
+    const map = sources[i]?.data?.column_map as Record<string, string | null> | undefined;
+    if (!map) return;
+    for (const u of uses) {
+      const has = u.field === "full_name" ? !!(map.first_name || map.last_name) : !!map[u.field];
+      if (!has) {
+        const label = FIELDS.find((f) => f.key === u.field)!.label.toLowerCase();
+        notes.push(`@${b.username} has no ${label} mapped, so people there see ${u.fallback ? `“${u.fallback}”` : "nothing"} instead.`);
+      }
+    }
+  });
+  return (
+    <div className="mt-2 space-y-1 text-sm">
+      <p className="text-ink-soft">
+        Personalized: each person sees their own {[...new Set(uses.map((u) => FIELDS.find((f) => f.key === u.field)!.label.toLowerCase()))].join(", ")}.
+        {uses.some((u) => u.fallback === null) && " People with no value see nothing there; add a fallback like {first_name|there}."}
+      </p>
+      {[...new Set(notes)].map((n) => (
+        <p key={n} className="text-accent-deep">{n}</p>
+      ))}
+    </div>
   );
 }

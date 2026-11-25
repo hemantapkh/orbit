@@ -7,6 +7,7 @@ import { api, ApiError, type PublicBroadcast } from "../../lib/api";
 import { fmt, when } from "../../lib/format";
 import { CampaignStatusTag, Panel } from "../../components/ui";
 import { DeliveryBar } from "./DeliveryBar";
+import { withSamples } from "../../lib/personalize";
 import { MessagePreview } from "./MessagePreview";
 import { ProgressInsights, StatusPanel } from "./Progress";
 
@@ -100,7 +101,7 @@ export function SharePage() {
           <aside className="space-y-3 lg:sticky lg:top-8 lg:self-start">
             <h2 className="text-lg font-semibold">Message</h2>
             {b.message ? (
-              <MessagePreview message={b.message} media={b.media} mediaSrc={`/api/public/shares/${token}/media`} />
+              <MessagePreview message={{ ...b.message, text: withSamples(b.message.text) }} media={b.media} mediaSrc={`/api/public/shares/${token}/media`} />
             ) : (
               <Panel className="p-5 text-sm text-ink-soft">The sender chose not to share the message itself.</Panel>
             )}
