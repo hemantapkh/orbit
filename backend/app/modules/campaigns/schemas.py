@@ -63,6 +63,7 @@ class CampaignOut(BaseModel):
     bot_ids: list[int]
     audience: Audience
     source_campaign_id: int | None
+    send_count: int = 1  # sends of this message so far (lists only)
     scheduled_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None

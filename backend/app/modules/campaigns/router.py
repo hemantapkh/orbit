@@ -94,12 +94,21 @@ async def list_campaigns(
     session: SessionDep,
     _: CurrentAdmin,
     status_: list[CampaignStatus] | None = Query(default=None, alias="status"),
+    q: str | None = Query(default=None, max_length=160),
+    group: bool = Query(default=False, description="Only the latest send of each message"),
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    base = select(Campaign)
+    family = func.coalesce(Campaign.source_campaign_id, Campaign.id)
+    conds = []
     if status_:
-        base = base.where(Campaign.status.in_(status_))
+        conds.append(Campaign.status.in_(status_))
+    if q and q.strip():
+        conds.append(func.lower(Campaign.name).like(f"%{q.strip().lower()}%"))
+    base = select(Campaign).where(*conds)
+    if group:
+        latest = select(func.max(Campaign.id)).where(*conds).group_by(family)
+        base = select(Campaign).where(Campaign.id.in_(latest))
     total = await session.scalar(select(func.count()).select_from(base.subquery()))
     items = (
         await session.scalars(
@@ -111,8 +120,22 @@ async def list_campaigns(
     ids = [c.id for c in items]
     bots = await service.bot_ids_for(session, ids)
     stats = await service.delivery_stats(session, ids)
+    roots = {c.id: c.source_campaign_id or c.id for c in items}
+    sends = dict(
+        (
+            await session.execute(
+                select(family, func.count()).where(family.in_(set(roots.values()))).group_by(family)
+            )
+        ).all()
+    )
     return CampaignPage(
-        items=[service.to_out(c, bots[c.id], stats[c.id]) for c in items], total=total
+        items=[
+            service.to_out(c, bots[c.id], stats[c.id]).model_copy(
+                update={"send_count": sends.get(roots[c.id], 1)}
+            )
+            for c in items
+        ],
+        total=total,
     )
 
 

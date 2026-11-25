@@ -116,3 +116,23 @@ async def test_delete_any_broadcast_except_while_sending(client, telegram_fake, 
     assert detail["source_campaign_id"] == second["id"]
     assert [s["id"] for s in detail["sends"]] == [second["id"], third["id"]]
     assert (await client.get(f"/campaigns/{first['id']}/deliveries")).status_code == 404
+
+
+async def test_list_search_and_group_resends(client):
+    a = await connect_bot(client, 0)
+    first = (
+        await client.post("/campaigns", json={"name": "Dashain greetings", "bot_ids": [a["id"]]})
+    ).json()
+    again = (await client.post(f"/campaigns/{first['id']}/duplicate")).json()
+    await client.post("/campaigns", json={"name": "Tihar offer", "bot_ids": [a["id"]]})
+
+    flat = (await client.get("/campaigns")).json()
+    assert flat["total"] == 3
+
+    grouped = (await client.get("/campaigns", params={"group": "true"})).json()
+    assert grouped["total"] == 2
+    dashain = next(x for x in grouped["items"] if x["name"] == "Dashain greetings")
+    assert dashain["id"] == again["id"] and dashain["send_count"] == 2
+
+    found = (await client.get("/campaigns", params={"q": "TIHAR", "group": "true"})).json()
+    assert [x["name"] for x in found["items"]] == ["Tihar offer"]
