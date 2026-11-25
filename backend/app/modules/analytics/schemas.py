@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -64,6 +64,13 @@ class BlockedPoint(BaseModel):
     count: int
 
 
+class BroadcastMarker(BaseModel):
+    id: int
+    name: str
+    started: datetime
+    bucket: date  # the chart bucket it falls in
+
+
 class AudienceAnalytics(BaseModel):
     period: Period
     bots: list[int]
@@ -72,4 +79,47 @@ class AudienceAnalytics(BaseModel):
     overlap: Overlap
     languages: Languages
     blocked: list[BlockedPoint]
+    broadcasts: list[BroadcastMarker]  # started in the period, through any selected bot
     errors: dict[int, str]  # bots whose database couldn't be read
+
+
+class BroadcastPerformance(BaseModel):
+    id: int
+    name: str
+    status: str
+    started: datetime
+    finished: datetime | None
+    total: int  # messages to the selected bots
+    sent: int
+    blocked: int
+    failed: int  # failed + unreachable
+    delivery_rate: float | None
+    block_rate: float | None
+    seconds: int | None
+
+
+class BroadcastAnalytics(BaseModel):
+    period: Period
+    items: list[BroadcastPerformance]
+
+
+class ColumnChoice(BaseModel):
+    ref: str  # "column" or "linked_table.column"
+    table: str
+    name: str
+    type: str
+
+
+class BreakdownItem(BaseModel):
+    value: str
+    people: int
+
+
+class Breakdown(BaseModel):
+    bot_id: int
+    column: str
+    total: int
+    items: list[BreakdownItem]  # top values, most people first
+    other: int  # people in values beyond the top
+    empty: int  # people with no value
+    grouped_by_month: bool

@@ -110,3 +110,99 @@ def test_period_buckets_align():
     assert p.unit == "week" and p.buckets[0].weekday() == 0 and p.buckets[-1] <= date(2026, 11, 25)
     m = period("12m", date(2026, 11, 25))
     assert m.buckets[0] == date(2025, 12, 1) and m.buckets[-1] == date(2026, 11, 1)
+
+
+async def test_broadcast_markers_and_performance(client, telegram_fake, delivery_engine):
+    from tests.conftest import drain
+
+    _cache.clear()
+    a = await connect_bot(client, 0)
+    await attach(
+        client, a["id"], bot_db("perf", [(1, 2, "en"), (2, 2, "en"), (3, 2, "ne"), (4, 2, "en")])
+    )
+    telegram_fake.blocked.add(4)
+    c = (
+        await client.post(
+            "/campaigns", json={"name": "Promo", "bot_ids": [a["id"]], "message": {"text": "hi"}}
+        )
+    ).json()
+    await client.post(f"/campaigns/{c['id']}/launch", json={})
+    await drain(delivery_engine)
+
+    r = (await client.get("/analytics/audience", params={"range": "7d"})).json()
+    assert [m["name"] for m in r["broadcasts"]] == ["Promo"]
+    assert r["broadcasts"][0]["bucket"] == r["period"]["buckets"][-1]
+
+    perf = (await client.get("/analytics/broadcasts", params={"range": "30d"})).json()
+    (item,) = perf["items"]
+    assert (
+        item["name"] == "Promo"
+        and item["total"] == 4
+        and item["sent"] == 3
+        and item["blocked"] == 1
+    )
+    assert (
+        item["delivery_rate"] == 0.75 and item["block_rate"] == 0.25 and item["seconds"] is not None
+    )
+    other_bot = await connect_bot(client, 1)
+    assert (await client.get("/analytics/broadcasts", params={"bot": other_bot["id"]})).json()[
+        "items"
+    ] == []
+
+
+async def test_breakdown_by_any_column(client):
+    _cache.clear()
+    a = await connect_bot(client, 0)
+    path = _tmp / f"breakdown-{datetime.now().timestamp()}.sqlite"
+    con = sqlite3.connect(path)
+    con.executescript(
+        """
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY, tg_id INTEGER, plan TEXT, premium BOOLEAN, joined DATE
+        );
+        CREATE TABLE settings (user_id INTEGER PRIMARY KEY REFERENCES users(id), lang TEXT);
+        INSERT INTO users VALUES (1, 11, 'pro', 1, '2026-01-05'), (2, 12, 'free', 0, '2026-01-20'),
+            (3, 13, 'free', 0, '2026-02-02'), (4, 14, NULL, 0, '2026-02-03');
+        INSERT INTO settings VALUES (1, 'ne'), (2, 'en'), (3, 'ne');
+        """
+    )
+    con.commit()
+    con.close()
+    r = await client.put(
+        f"/bots/{a['id']}/source",
+        json={
+            "database_url": f"sqlite:///{path}",
+            "table": "users",
+            "column_map": {"chat_id": "tg_id"},
+            "joins": [{"table": "settings", "base_column": "id", "related_column": "user_id"}],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    cols = (await client.get("/analytics/columns", params={"bot": a["id"]})).json()
+    assert {"plan", "premium", "settings.lang"} <= {c["ref"] for c in cols}
+
+    def items(resp):
+        return {i["value"]: i["people"] for i in resp["items"]}
+
+    plan = (
+        await client.get("/analytics/breakdown", params={"bot": a["id"], "column": "plan"})
+    ).json()
+    assert items(plan) == {"free": 2, "pro": 1} and plan["empty"] == 1 and plan["total"] == 4
+
+    lang = (
+        await client.get("/analytics/breakdown", params={"bot": a["id"], "column": "settings.lang"})
+    ).json()
+    assert items(lang) == {"ne": 2, "en": 1} and lang["empty"] == 1
+
+    joined = (
+        await client.get("/analytics/breakdown", params={"bot": a["id"], "column": "joined"})
+    ).json()
+    assert joined["grouped_by_month"] is True and items(joined) == {"2026-01": 2, "2026-02": 2}
+
+    bad = await client.get("/analytics/breakdown", params={"bot": a["id"], "column": "password"})
+    assert bad.status_code == 422 and "doesn't exist" in bad.json()["detail"]
+    nolink = await client.get(
+        "/analytics/breakdown", params={"bot": a["id"], "column": "accounts.token"}
+    )
+    assert nolink.status_code == 422
