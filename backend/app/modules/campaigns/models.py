@@ -97,6 +97,9 @@ class Delivery(Base):
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"))
     bot_id: Mapped[int] = mapped_column(ForeignKey("bots.id", ondelete="CASCADE"))
     chat_id: Mapped[int] = mapped_column(BigInteger)
+    # Values for {first_name} etc., read from the bot's database when sending started.
+    # Only stored when the message is personalized.
+    vars: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default=DeliveryStatus.PENDING)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

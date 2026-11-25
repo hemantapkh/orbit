@@ -19,7 +19,7 @@ from app.core.db import utcnow
 from app.integrations.telegram.bots import unseal_token
 from app.integrations.telegram.client import MediaRef, TelegramClient
 from app.integrations.telegram.delivery import SendStatus, deliver
-from app.integrations.telegram.messages import MessageContent
+from app.integrations.telegram.messages import MessageContent, personalize, uses_placeholders
 from app.modules.activity.service import record
 from app.modules.bots.models import Bot
 from app.modules.campaigns.models import (
@@ -36,7 +36,9 @@ from app.modules.media.service import media_ref_for_bot, remember_file_id
 from app.modules.sources.service import (
     database_sources,
     iter_audience,
+    iter_audience_people,
     mark_error,
+    people_by_chat,
     suppress,
     suppressed_ids,
 )
@@ -145,10 +147,11 @@ class DeliveryEngine:
                 # whose recipient list is still being written.
                 campaign = await s.get(Campaign, cid)
                 audience = Audience.model_validate(campaign.audience or {})
+                personal = uses_placeholders(MessageContent.model_validate(campaign.message).text)
                 if audience.mode == "selected":
-                    await self._snapshot_selected(s, cid, audience)
+                    await self._snapshot_selected(s, cid, audience, personal)
                 else:
-                    await self._snapshot_database_audiences(s, cid, campaign.org_id)
+                    await self._snapshot_database_audiences(s, cid, campaign.org_id, personal)
                 record(
                     s,
                     None,
@@ -162,7 +165,9 @@ class DeliveryEngine:
                 log.info("Campaign %s started", cid)
 
     @staticmethod
-    async def _snapshot_selected(s: AsyncSession, campaign_id: int, audience: Audience) -> None:
+    async def _snapshot_selected(
+        s: AsyncSession, campaign_id: int, audience: Audience, personal: bool = False
+    ) -> None:
         """Hand-picked recipients. People who blocked the bot are still skipped."""
         bot_ids = set(
             (
@@ -180,11 +185,18 @@ class DeliveryEngine:
         rows = []
         for bot_id, chat_ids in by_bot.items():
             skip = await suppressed_ids(s, bot_id)
+            people: dict[int, dict] = {}
+            if personal:
+                try:
+                    people = await people_by_chat(s, bot_id, chat_ids)
+                except Exception:  # names are a nicety: send with fallbacks if unavailable
+                    log.warning("Campaign %s: couldn't read names for bot %s", campaign_id, bot_id)
             rows += [
                 {
                     "campaign_id": campaign_id,
                     "bot_id": bot_id,
                     "chat_id": cid,
+                    "vars": people.get(cid) if personal else None,
                     "status": DeliveryStatus.PENDING,
                     "attempts": 0,
                 }
@@ -195,7 +207,9 @@ class DeliveryEngine:
             await s.execute(insert(Delivery), rows)
 
     @staticmethod
-    async def _snapshot_database_audiences(s: AsyncSession, campaign_id: int, org_id: int) -> None:
+    async def _snapshot_database_audiences(
+        s: AsyncSession, campaign_id: int, org_id: int, personal: bool = False
+    ) -> None:
         """Read each database-source bot's recipients from its own database.
 
         A bot's list is read completely before anything is inserted, so a failure midway
@@ -208,10 +222,14 @@ class DeliveryEngine:
             )
         ).all()
         for bot_id, source in (await database_sources(s, bot_ids)).items():
-            chat_ids: list[int] = []
+            people: list[tuple[int, dict | None]] = []
             try:
-                async for chunk in iter_audience(s, source):
-                    chat_ids.extend(chunk)
+                if personal:
+                    async for chunk in iter_audience_people(s, source):
+                        people.extend(chunk)
+                else:
+                    async for chunk in iter_audience(s, source):
+                        people.extend((cid, None) for cid in chunk)
             except Exception as exc:
                 mark_error(source, exc)
                 record(
@@ -231,7 +249,7 @@ class DeliveryEngine:
                 )
                 log.error("Campaign %s: source for bot %s failed", campaign_id, bot_id)
                 continue
-            for i in range(0, len(chat_ids), 5000):
+            for i in range(0, len(people), 5000):
                 await s.execute(
                     insert(Delivery),
                     [
@@ -239,10 +257,11 @@ class DeliveryEngine:
                             "campaign_id": campaign_id,
                             "bot_id": bot_id,
                             "chat_id": cid,
+                            "vars": person,
                             "status": DeliveryStatus.PENDING,
                             "attempts": 0,
                         }
-                        for cid in chat_ids[i : i + 5000]
+                        for cid, person in people[i : i + 5000]
                     ],
                 )
 
@@ -384,7 +403,7 @@ class DeliveryEngine:
         await limiter.acquire()
         attempts = d.attempts + 1
         try:
-            r = await deliver(self._tg, token, d.chat_id, content, media)
+            r = await deliver(self._tg, token, d.chat_id, personalize(content, d.vars), media)
         except Exception as exc:  # never let one bad send kill the batch
             log.exception("Unexpected error delivering %s", d.id)
             return Outcome(d.id, d.chat_id, DeliveryStatus.FAILED, attempts, repr(exc)[:500])

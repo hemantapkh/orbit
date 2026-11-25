@@ -414,3 +414,52 @@ async def stream_chat_ids(engine: AsyncEngine, spec: SourceSpec) -> AsyncIterato
             ids = [cid for (v,) in part if (cid := as_chat_id(v)) is not None]
             if ids:
                 yield ids
+
+
+PERSON_FIELDS = ("username", "first_name", "last_name")
+
+
+def people_query(src: Resolved, spec: SourceSpec, chat_ids: list[int] | None = None):
+    """Chat id plus the mapped name fields, for personalized messages."""
+    mapping = spec.column_map.mapped()
+    chat = _chat(src, spec)
+    cols = [chat.label("chat_id")] + [
+        _value(src, mapping[f]).label(f) for f in PERSON_FIELDS if mapping.get(f)
+    ]
+    stmt = select(*cols).where(where_clause(src, spec))
+    if chat_ids is not None:
+        stmt = stmt.where(chat.in_(chat_ids))
+    return stmt
+
+
+def _person(row) -> tuple[int, dict] | None:
+    cid = as_chat_id(row["chat_id"])
+    if cid is None:
+        return None
+    return cid, {f: row[f] for f in PERSON_FIELDS if f in row and row[f] is not None}
+
+
+async def stream_people(
+    engine: AsyncEngine, spec: SourceSpec
+) -> AsyncIterator[list[tuple[int, dict]]]:
+    async with engine.connect() as conn:
+        src = await reflect(conn, spec)
+        result = await conn.stream(people_query(src, spec).execution_options(yield_per=CHUNK))
+        async for part in result.mappings().partitions(CHUNK):
+            people = [p for row in part if (p := _person(row))]
+            if people:
+                yield people
+
+
+async def fetch_people(
+    engine: AsyncEngine, spec: SourceSpec, chat_ids: list[int]
+) -> dict[int, dict]:
+    out: dict[int, dict] = {}
+    async with engine.connect() as conn:
+        src = await reflect(conn, spec)
+        for i in range(0, len(chat_ids), 1000):
+            rows = (await conn.execute(people_query(src, spec, chat_ids[i : i + 1000]))).mappings()
+            for row in rows:
+                if (p := _person(row)) and p[0] not in out:
+                    out[p[0]] = p[1]
+    return out

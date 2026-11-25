@@ -1,6 +1,8 @@
 """Platform-wide message model. Any module that sends to Telegram (campaigns now,
 automations later) composes a MessageContent rather than raw Bot API payloads."""
 
+import html
+import re
 from typing import Literal, Self
 
 import telegramify_markdown
@@ -51,3 +53,44 @@ class MessageContent(BaseModel):
     @property
     def is_empty(self) -> bool:
         return not self.text.strip() and self.media_id is None
+
+
+# ---- personalization ------------------------------------------------------------------
+# {first_name}, {last_name}, {full_name}, {username}, each with an optional fallback:
+# "Hi {first_name|there}!" -> "Hi Ana!" or "Hi there!".
+
+FIELDS = ("first_name", "last_name", "full_name", "username")
+PLACEHOLDER = re.compile(r"\{(" + "|".join(FIELDS) + r")(?:\|([^{}\n]{0,60}))?\}")
+_MD_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|~>])")
+_MDV2_SPECIAL = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
+
+
+def uses_placeholders(text: str) -> bool:
+    return bool(PLACEHOLDER.search(text or ""))
+
+
+def _escape(value: str, parse_mode: str | None) -> str:
+    """A person's name must never be able to change the message's formatting."""
+    if parse_mode == "HTML":
+        return html.escape(value, quote=False)
+    if parse_mode == "Markdown":
+        return _MD_SPECIAL.sub(r"\\\1", value)
+    if parse_mode == "MarkdownV2":
+        return _MDV2_SPECIAL.sub(r"\\\1", value)
+    return value
+
+
+def personalize(content: MessageContent, person: dict | None) -> MessageContent:
+    """Fill placeholders for one recipient. Missing values use the fallback, else nothing."""
+    if not uses_placeholders(content.text):
+        return content
+    p = {k: (str(v).strip() if v is not None else "") for k, v in (person or {}).items()}
+    p["full_name"] = " ".join(x for x in (p.get("first_name"), p.get("last_name")) if x)
+
+    def fill(m: re.Match) -> str:
+        value = p.get(m.group(1), "")
+        if value:
+            return _escape(value, content.parse_mode)
+        return m.group(2) or ""  # the fallback is the author's own text: used as written
+
+    return content.model_copy(update={"text": PLACEHOLDER.sub(fill, content.text)})

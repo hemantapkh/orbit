@@ -17,10 +17,12 @@ from app.modules.sources.models import BotSource, BotSuppression, SourceKind, So
 from app.modules.sources.query import (
     as_chat_id,
     count_query,
+    fetch_people,
     reflect,
     rows_query,
     search_query,
     stream_chat_ids,
+    stream_people,
 )
 from app.modules.sources.schemas import ColumnMap, PreviewOut, SourceSpec, SubscriberCounts
 
@@ -312,3 +314,26 @@ async def active_audience_size(session: AsyncSession, bot_ids: list[int]) -> int
 async def unique_active_people(session: AsyncSession, bot_ids: list[int]) -> int:
     """Distinct people across all bots (private chat_id == Telegram user id)."""
     return len(await database_people(session, bot_ids))
+
+
+async def iter_audience_people(
+    session: AsyncSession, source: BotSource
+) -> AsyncIterator[list[tuple[int, dict]]]:
+    """Like iter_audience, with each person's name fields for personalized messages."""
+    skip = await suppressed_ids(session, source.bot_id)
+    seen: set[int] = set()
+    async for chunk in stream_people(await engine_for(source), spec_of(source)):
+        fresh = [(cid, v) for cid, v in chunk if cid not in skip and cid not in seen]
+        seen.update(cid for cid, _ in fresh)
+        if fresh:
+            yield fresh
+
+
+async def people_by_chat(
+    session: AsyncSession, bot_id: int, chat_ids: list[int]
+) -> dict[int, dict]:
+    """Name fields for specific chats (picked people, test sends). Empty if unknown."""
+    source = (await database_sources(session, [bot_id])).get(bot_id)
+    if source is None or not chat_ids:
+        return {}
+    return await fetch_people(await engine_for(source), spec_of(source), chat_ids)

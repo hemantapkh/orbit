@@ -10,7 +10,7 @@ from app.core.db import dialect_name, utcnow
 from app.integrations.telegram.bots import unseal_token
 from app.integrations.telegram.client import TelegramClient
 from app.integrations.telegram.delivery import SendResult, deliver
-from app.integrations.telegram.messages import MessageContent
+from app.integrations.telegram.messages import MessageContent, personalize, uses_placeholders
 from app.modules.bots.models import Bot
 from app.modules.campaigns.models import (
     Campaign,
@@ -33,7 +33,7 @@ from app.modules.campaigns.schemas import (
 )
 from app.modules.media.models import MediaAsset
 from app.modules.media.service import media_ref_for_bot, remember_file_id
-from app.modules.sources.service import counts_by_bot
+from app.modules.sources.service import counts_by_bot, people_by_chat
 
 
 def _stats(counts: dict[str, int]) -> DeliveryStats:
@@ -182,6 +182,12 @@ async def send_once(
     if message.media_id is not None:
         asset = await session.get(MediaAsset, message.media_id)
         media = await media_ref_for_bot(session, asset, bot.id)
+    if uses_placeholders(message.text):
+        try:
+            person = (await people_by_chat(session, bot.id, [chat_id])).get(chat_id)
+        except Exception:
+            person = None  # groups, channels or unreadable database: fallbacks apply
+        message = personalize(message, person)
     result = await deliver(telegram, unseal_token(bot.token_encrypted), chat_id, message, media)
     if asset and result.file_id:
         await remember_file_id(session, asset.id, bot.id, result.file_id)
