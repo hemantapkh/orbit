@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { api, type Bot, type Campaign, type CampaignStatus, type Page } from "../../lib/api";
@@ -26,6 +27,14 @@ export function CampaignsPage() {
     refetchInterval: (q) => (q.state.data?.items.some((c) => c.status === "running" || c.status === "scheduled") ? 3000 : false),
   });
   const bots = useQuery({ queryKey: ["bots"], queryFn: () => api<Bot[]>("/bots") });
+  const qc = useQueryClient();
+  const remove = useMutation({
+    mutationFn: (id: number) => api(`/campaigns/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["campaigns"] });
+      qc.invalidateQueries({ queryKey: ["overview"] });
+    },
+  });
   const botName = (id: number) => bots.data?.find((b) => b.id === id)?.username;
 
   return (
@@ -56,6 +65,7 @@ export function CampaignsPage() {
       </div>
 
       {list.error && <Notice>{list.error.message}</Notice>}
+      {remove.error && <div className="mb-4"><Notice>{remove.error.message}</Notice></div>}
       {list.isPending && <Skeleton className="h-60" />}
       {list.data?.items.length === 0 && (
         <Panel className="px-6 py-12 text-center text-ink-soft">
@@ -65,10 +75,10 @@ export function CampaignsPage() {
       {!!list.data?.items.length && (
         <Panel className="divide-y divide-line">
           {list.data.items.map((c) => (
+            <div key={c.id} className="group flex items-center hover:bg-canvas/70">
             <Link
-              key={c.id}
               to={c.status === "draft" ? `/broadcasts/${c.id}/edit` : `/broadcasts/${c.id}`}
-              className="grid gap-x-6 gap-y-2 px-5 py-4 hover:bg-canvas/70 md:grid-cols-[minmax(0,1fr)_120px_220px]"
+              className="grid min-w-0 flex-1 gap-x-6 gap-y-2 py-4 pl-5 md:grid-cols-[minmax(0,1fr)_120px_220px]"
             >
               <div className="min-w-0">
                 <p className="truncate font-medium">{c.name}</p>
@@ -94,6 +104,19 @@ export function CampaignsPage() {
                 )}
               </div>
             </Link>
+            <div className="px-3">
+              <button
+                type="button"
+                aria-label={`Delete ${c.name}`}
+                title={c.status === "running" ? "Pause or stop it before deleting" : "Delete"}
+                disabled={c.status === "running" || remove.isPending}
+                onClick={() => confirmDelete(c) && remove.mutate(c.id)}
+                className="rounded-md p-2 text-ink-faint opacity-60 transition-opacity group-hover:opacity-100 hover:bg-status-error/10 hover:text-status-error focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-faint"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
+            </div>
           ))}
         </Panel>
       )}
@@ -109,5 +132,15 @@ export function CampaignsPage() {
         </div>
       )}
     </>
+  );
+}
+
+/** Shared wording so the list and the detail page warn the same way. */
+export function confirmDelete(c: Pick<Campaign, "name" | "status" | "stats">) {
+  const history = c.stats.total > 0;
+  return confirm(
+    history
+      ? `Delete "${c.name}" and its delivery history? Messages already delivered stay in people's chats.`
+      : `Delete "${c.name}"?`,
   );
 }

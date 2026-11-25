@@ -6,6 +6,7 @@ import { api, type CampaignDetail, type Delivery, type Media, type Page, type Re
 import { fmt, pct, when } from "../../lib/format";
 import { Button, buttonClass, CampaignStatusTag, cx, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
 import { ActivityList } from "../activity/ActivityList";
+import { confirmDelete } from "./CampaignsPage";
 import { DeliveryBar } from "./DeliveryBar";
 import { MessagePreview } from "./MessagePreview";
 
@@ -43,6 +44,7 @@ export function CampaignDetailPage() {
     mutationFn: () => api(`/campaigns/${campaignId}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["campaigns"] });
+      qc.invalidateQueries({ queryKey: ["overview"] });
       nav("/broadcasts");
     },
   });
@@ -57,7 +59,7 @@ export function CampaignDetailPage() {
     <>
       {c.status === "draft" && (
         <>
-          <Button variant="danger" onClick={() => confirm("Delete this draft?") && remove.mutate()}>Delete</Button>
+          <Button variant="danger" onClick={() => confirmDelete(c) && remove.mutate()}>Delete</Button>
           <Link to={`/broadcasts/${c.id}/edit`} className={buttonClass("primary")}>Edit draft</Link>
         </>
       )}
@@ -73,6 +75,9 @@ export function CampaignDetailPage() {
         <Button variant="danger" onClick={() => confirm("Stop this broadcast? Messages not yet sent will be skipped.") && act.mutate("cancel")}>
           Stop
         </Button>
+      )}
+      {c.status !== "draft" && c.status !== "running" && (
+        <Button variant="danger" onClick={() => confirmDelete(c) && remove.mutate()}>Delete</Button>
       )}
       {c.status !== "draft" && (
         <Button variant={c.status === "completed" || c.status === "cancelled" ? "primary" : "secondary"} onClick={() => act.mutate("duplicate")}>
