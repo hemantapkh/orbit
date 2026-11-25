@@ -16,7 +16,7 @@ import {
   type TestSendResult,
 } from "../../lib/api";
 import { duration, fmt, toLocalInput, when } from "../../lib/format";
-import { Button, buttonClass, cx, Dialog, fieldClass, StatusDot, Field, Input, Notice, PageHeader, Panel, Skeleton, Textarea } from "../../components/ui";
+import { Button, buttonClass, cx, Dialog, fieldClass, StatusDot, Field, Input, Notice, Panel, Skeleton, Textarea } from "../../components/ui";
 import { MessagePreview } from "./MessagePreview";
 import { PeoplePicker } from "./PeoplePicker";
 
@@ -118,22 +118,38 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
       <Link to="/broadcasts" className="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-soft hover:text-ink">
         <ArrowLeft size={15} /> Broadcasts
       </Link>
-      <PageHeader
-        title={id ? "Edit broadcast" : "New broadcast"}
-        lede={editingScheduled ? `Scheduled for ${when(initial!.scheduled_at)}. Changes apply to that send.` : undefined}
-      />
+      <header className="mb-8">
+        <label htmlFor="name" className="sr-only">Broadcast name</label>
+        <input
+          id="name"
+          value={name}
+          maxLength={160}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Untitled broadcast"
+          className="w-full rounded-md bg-transparent text-[28px] leading-tight font-semibold tracking-[-0.015em] placeholder:text-ink-faint focus:shadow-[0_0_0_4px_rgba(184,145,58,0.16)] focus:outline-none"
+        />
+        <p className="mt-1 text-sm text-ink-soft">
+          {editingScheduled
+            ? `Scheduled for ${when(initial!.scheduled_at)}. Changes apply to that send.`
+            : "Only operators see the name. Recipients see the message."}
+        </p>
+      </header>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-8">
-          <Field label="Name" htmlFor="name" hint="Only you and other operators see this.">
-            <Input id="name" placeholder="November product update" value={name} maxLength={160} onChange={(e) => setName(e.target.value)} />
-          </Field>
-
+        <div className="space-y-5">
           <Section
             title="Audience"
             aside={
-              botIds.length > 0 &&
-              (picking ? `${fmt(reachCount)} ${reachCount === 1 ? "person" : "people"} picked` : `${fmt(reachCount)} active subscribers`)
+              bots.length > 0 && (
+                <span className="flex gap-3">
+                  <button type="button" className="hover:text-ink" onClick={() => setBotIds(usable.map((b) => b.id))}>
+                    Select all
+                  </button>
+                  <button type="button" className="hover:text-ink" onClick={() => setBotIds([])}>
+                    Clear
+                  </button>
+                </span>
+              )
             }
           >
             {bots.length === 0 ? (
@@ -142,45 +158,33 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
               </p>
             ) : (
               <>
-                <div className="mb-2 flex gap-3 text-sm">
-                  <button type="button" className="text-ink-soft hover:text-ink" onClick={() => setBotIds(usable.map((b) => b.id))}>
-                    Select all
-                  </button>
-                  <button type="button" className="text-ink-soft hover:text-ink" onClick={() => setBotIds([])}>
-                    Clear
-                  </button>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="flex flex-wrap gap-2" role="group" aria-label="Bots">
                   {bots.map((b) => {
-                    const disabled = !b.is_active || !b.token_valid;
+                    const disabled = !b.is_active || !b.token_valid || !b.subscribers.connected;
                     const on = botIds.includes(b.id);
+                    const why = !b.is_active ? "disabled" : !b.token_valid ? "token rejected" : !b.subscribers.connected ? "no database" : null;
                     return (
-                      <label
+                      <button
                         key={b.id}
+                        type="button"
+                        aria-pressed={on}
+                        disabled={disabled && !on}
+                        onClick={() => toggleBot(b.id)}
+                        title={why ? `@${b.username}: ${why}` : `@${b.username}`}
                         className={cx(
-                          "flex cursor-pointer items-center gap-3 rounded-lg border px-3.5 py-3 transition-[border-color,box-shadow,background-color]",
+                          "inline-flex items-center gap-2 rounded-full border py-1.5 pr-3 pl-2.5 text-sm transition-[background-color,border-color,box-shadow]",
                           on
-                            ? "border-panel/60 bg-panel/[0.035] shadow-[0_0_0_3px_rgba(30,58,51,0.08)]"
-                            : "border-line bg-surface hover:border-line-strong",
-                          disabled && "cursor-not-allowed opacity-55",
+                            ? "border-panel bg-panel text-white shadow-[0_1px_2px_rgba(23,33,30,0.2)]"
+                            : "border-line bg-surface text-ink hover:border-line-strong",
+                          disabled && !on && "cursor-not-allowed opacity-50",
                         )}
                       >
-                        <input
-                          type="checkbox"
-                          className="size-4 accent-[#1e3a33]"
-                          checked={on}
-                          disabled={disabled && !on}
-                          onChange={() => toggleBot(b.id)}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">{b.display_name}</span>
-                          <span className="block truncate text-sm text-ink-faint">
-                            @{b.username}
-                            {disabled && (b.is_active ? " · token rejected" : " · disabled")}
-                          </span>
+                        <span className={cx("grid size-4 place-items-center rounded-full border text-[10px]", on ? "border-white/70 bg-white/15" : "border-line-strong")}>
+                          {on ? "✓" : ""}
                         </span>
-                        <span className="text-sm font-semibold">{fmt(b.subscribers.active)}</span>
-                      </label>
+                        <span className="font-medium">{b.display_name}</span>
+                        <span className={on ? "text-white/70" : "text-ink-faint"}>{why ?? fmt(b.subscribers.active)}</span>
+                      </button>
                     );
                   })}
                 </div>
@@ -243,12 +247,12 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
             </div>
           </Section>
 
-          <Section title="Buttons" aside="Link buttons shown under the message">
+          <Section title="Buttons" aside="Optional links under the message">
             <ButtonsEditor value={message.buttons} onChange={(buttons) => patch({ buttons })} />
           </Section>
 
-          <Section title="Delivery options">
-            <div className="space-y-3">
+          <Section title="Options">
+            <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
               <Toggle checked={message.silent} onChange={(silent) => patch({ silent })} label="Send silently" hint="Arrives without a notification sound." />
               <Toggle checked={message.disable_link_preview} onChange={(v) => patch({ disable_link_preview: v })} label="Hide link previews" hint="Applies to text-only messages." />
               <Toggle checked={message.protect_content} onChange={(v) => patch({ protect_content: v })} label="Protect content" hint="Recipients can't forward or save it." />
@@ -324,13 +328,13 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
 
 function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
-    <section>
-      <div className="mb-3 flex items-baseline justify-between gap-4">
+    <Panel className="p-5">
+      <div className="mb-4 flex items-baseline justify-between gap-4">
         <h2 className="font-semibold">{title}</h2>
         {aside && <span className="text-sm text-ink-soft">{aside}</span>}
       </div>
       {children}
-    </section>
+    </Panel>
   );
 }
 
