@@ -12,7 +12,7 @@ async def _setup(client, n_a=5, n_b=3):
 
 
 async def _campaign(client, bot_ids, **message):
-    msg = {"text": "<b>Hello</b>", **message}
+    msg = {"text": "<b>Hello</b>", "parse_mode": "HTML", **message}
     r = await client.post("/campaigns", json={"name": "Launch", "bot_ids": bot_ids, "message": msg})
     assert r.status_code == 201, r.text
     return r.json()
@@ -153,3 +153,15 @@ async def test_test_send(client, telegram_fake):
         "/campaigns/test-send", json={"bot_id": a["id"], "chat_id": 43, "message": {"text": "hi"}}
     )
     assert r.status_code == 422 and "Start" in r.json()["detail"]
+
+
+async def test_standard_markdown_is_sent_as_markdown_v2(client, telegram_fake):
+    a = await connect_bot(client)
+    r = await client.post(
+        "/campaigns/test-send",
+        json={"bot_id": a["id"], "chat_id": 42, "message": {"text": "**Hi** _there_, v1.5!"}},
+    )
+    assert r.status_code == 200
+    sent = telegram_fake.sent[-1]
+    assert sent["parse_mode"] == "MarkdownV2"
+    assert sent["text"] == "*Hi* _there_, v1\\.5\\!"

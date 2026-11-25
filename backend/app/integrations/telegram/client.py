@@ -78,9 +78,10 @@ class TelegramClient:
     async def send(
         self, token: str, chat_id: int, content: MessageContent, media: MediaRef | None = None
     ) -> SentMessage:
+        text, parse_mode = content.rendered()
         params: dict[str, Any] = {"chat_id": chat_id}
-        if content.parse_mode:
-            params["parse_mode"] = content.parse_mode
+        if parse_mode:
+            params["parse_mode"] = parse_mode
         if content.silent:
             params["disable_notification"] = True
         if content.protect_content:
@@ -91,15 +92,15 @@ class TelegramClient:
             }
 
         if media is None:
-            params["text"] = content.text
+            params["text"] = text
             if content.disable_link_preview:
                 params["link_preview_options"] = {"is_disabled": True}
             result = await self.call(token, "sendMessage", params)
             return SentMessage(message_id=result["message_id"])
 
         method, field = _MEDIA_METHOD[media.kind]
-        if content.text:
-            params["caption"] = content.text
+        if text:
+            params["caption"] = text
         files = None
         if media.file_id:
             params[field] = media.file_id

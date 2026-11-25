@@ -18,6 +18,7 @@ dependencies = [
     "pyjwt>=2.15.1",
     "python-multipart>=0.0.34",
     "sqlalchemy[asyncio]>=2.0",
+    "telegramify-markdown>=1.4.2",
     "uvicorn[standard]>=0.54.0",
 ]
 
