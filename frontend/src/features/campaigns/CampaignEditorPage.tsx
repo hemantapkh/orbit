@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Bold, Code, Italic, Link2, Paperclip, Plus, Strikethrough, Trash2, Underline } from "lucide-react";
+import { ArrowLeft, Bold, Check, X, Code, Italic, Link2, Paperclip, Plus, Strikethrough, Trash2, Underline } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -174,16 +174,21 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
                         className={cx(
                           "inline-flex items-center gap-2 rounded-full border py-1.5 pr-3 pl-2.5 text-sm transition-[background-color,border-color,box-shadow]",
                           on
-                            ? "border-panel bg-panel text-white shadow-[0_1px_2px_rgba(23,33,30,0.2)]"
+                            ? "border-panel/50 bg-panel/[0.06] text-ink shadow-[0_0_0_3px_rgba(23,51,44,0.07)]"
                             : "border-line bg-surface text-ink hover:border-line-strong",
                           disabled && !on && "cursor-not-allowed opacity-50",
                         )}
                       >
-                        <span className={cx("grid size-4 place-items-center rounded-full border text-[10px]", on ? "border-white/70 bg-white/15" : "border-line-strong")}>
-                          {on ? "✓" : ""}
+                        <span
+                          className={cx(
+                            "grid size-4 place-items-center rounded-full border",
+                            on ? "border-panel bg-panel text-white" : "border-line-strong",
+                          )}
+                        >
+                          {on && <Check size={10} strokeWidth={3.5} />}
                         </span>
                         <span className="font-medium">{b.display_name}</span>
-                        <span className={on ? "text-white/70" : "text-ink-faint"}>{why ?? fmt(b.subscribers.active)}</span>
+                        <span className="text-ink-faint">{why ?? fmt(b.subscribers.active)}</span>
                       </button>
                     );
                   })}
@@ -264,16 +269,17 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
           <ReachCard bots={selected} picked={picking ? recipients.length : null} />
           <section aria-label="Preview">
             <h2 className="mb-3 font-semibold">Preview</h2>
-            <MessagePreview message={message} media={media.data ?? null} botName={selected[0] ? `@${selected[0].username}` : undefined} />
+            <MessagePreview message={message} media={media.data ?? null} />
           </section>
-          <TestPanel
-            groups={testGroups.data}
-            groupId={testGroupId}
-            onGroup={setPickedGroup}
-            results={sendTest.data}
-            error={sendTest.error}
-            bots={bots}
-          />
+          {(sendTest.data || sendTest.error) && (
+            <TestResults
+              groupName={testGroups.data?.find((g) => g.id === testGroupId)?.name ?? "test group"}
+              results={sendTest.data}
+              error={sendTest.error}
+              bots={bots}
+              onDismiss={() => sendTest.reset()}
+            />
+          )}
         </aside>
       </div>
 
@@ -286,13 +292,32 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
               {save.isPending ? "Saving…" : "Save draft"}
             </Button>
             {testGroupId ? (
-              <Button
-                onClick={() => sendTest.mutate()}
-                disabled={isEmpty || tooLong || sendTest.isPending}
-                title={`Send to ${testGroups.data?.find((g) => g.id === testGroupId)?.name}`}
-              >
-                {sendTest.isPending ? "Sending test…" : "Send test"}
-              </Button>
+              <div className="inline-flex">
+                <Button
+                  className="rounded-r-none"
+                  onClick={() => sendTest.mutate()}
+                  disabled={isEmpty || tooLong || sendTest.isPending}
+                >
+                  {sendTest.isPending ? "Sending test…" : "Send test"}
+                </Button>
+                <select
+                  aria-label="Test group"
+                  title="Who receives the test"
+                  value={testGroupId}
+                  onChange={(e) => {
+                    if (e.target.value === "manage") nav("/broadcasts/test-groups");
+                    else setPickedGroup(Number(e.target.value));
+                  }}
+                  className="h-10 max-w-[180px] truncate rounded-r-lg border border-l-0 border-line bg-surface pl-3 text-sm text-ink-soft shadow-[0_1px_2px_rgba(23,33,30,0.05)] hover:bg-canvas/60 focus:outline-none"
+                >
+                  {testGroups.data?.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} ({g.members.length})
+                    </option>
+                  ))}
+                  <option value="manage">Manage test groups…</option>
+                </select>
+              </div>
             ) : (
               <Link to="/broadcasts/test-groups" className={buttonClass("secondary")}>
                 Set up a test group
@@ -526,47 +551,36 @@ function ReachCard({ bots, picked }: { bots: Bot[]; picked: number | null }) {
   );
 }
 
-function TestPanel({
-  groups,
-  groupId,
-  onGroup,
+function TestResults({
+  groupName,
   results,
   error,
   bots,
+  onDismiss,
 }: {
-  groups: TestGroup[] | undefined;
-  groupId: number | null;
-  onGroup: (id: number) => void;
+  groupName: string;
   results: TestSendResult[] | undefined;
   error: Error | null;
   bots: Bot[];
+  onDismiss: () => void;
 }) {
   const botName = (id: number) => bots.find((b) => b.id === id)?.username ?? `bot ${id}`;
+  const delivered = results?.filter((r) => r.delivered).length ?? 0;
   return (
-    <Panel className="space-y-3 p-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="font-semibold">Test before sending</h2>
-        <Link to="/broadcasts/test-groups" className="text-sm text-ink-soft underline-offset-4 hover:text-ink hover:underline">
-          Manage
-        </Link>
+    <Panel className="space-y-3 p-4" aria-live="polite">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold">Test sent to {groupName}</h2>
+          {results && (
+            <p className="text-sm text-ink-soft">
+              {delivered} of {results.length} delivered
+            </p>
+          )}
+        </div>
+        <button type="button" onClick={onDismiss} aria-label="Dismiss test results" className="-m-1 rounded p-1 text-ink-faint hover:text-ink">
+          <X size={16} />
+        </button>
       </div>
-      {!groups?.length ? (
-        <p className="text-sm text-ink-soft">
-          Create a test group with your own account (and any QA groups or channels), then use{" "}
-          <strong className="text-ink">Send test</strong> to see the message in Telegram first.
-        </p>
-      ) : (
-        <>
-          <select aria-label="Test group" className={`${fieldClass} h-10`} value={groupId ?? ""} onChange={(e) => onGroup(Number(e.target.value))}>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name} ({g.members.length})
-              </option>
-            ))}
-          </select>
-          <p className="text-sm text-ink-faint">Send test delivers the current message, even unsaved, to everyone in this group.</p>
-        </>
-      )}
       {error && <Notice>{error.message}</Notice>}
       {results && (
         <ul className="divide-y divide-line rounded-lg border border-line text-sm" aria-label="Test results">
