@@ -94,3 +94,29 @@ async def test_selected_people_must_belong_to_campaign_bots(client):
         )
     ).json()
     assert (await client.post(f"/campaigns/{empty['id']}/launch", json={})).status_code == 422
+
+
+async def test_delete_any_broadcast_except_while_sending(client, telegram_fake, delivery_engine):
+    a = await connect_bot(client, 0)
+    await push(client, a["api_key"], [1, 2])
+    first = (
+        await client.post(
+            "/campaigns", json={"name": "x", "bot_ids": [a["id"]], "message": {"text": "hi"}}
+        )
+    ).json()
+    await client.post(f"/campaigns/{first['id']}/launch", json={})
+    await delivery_engine.tick()  # running now
+    assert (await client.get(f"/campaigns/{first['id']}")).json()["status"] == "running"
+    assert (await client.delete(f"/campaigns/{first['id']}")).status_code == 409
+    await drain(delivery_engine)
+
+    second = (await client.post(f"/campaigns/{first['id']}/duplicate")).json()
+    third = (await client.post(f"/campaigns/{first['id']}/duplicate")).json()
+
+    # deleting the original (completed) keeps the resends grouped under the oldest one
+    assert (await client.delete(f"/campaigns/{first['id']}")).status_code == 204
+    assert (await client.get(f"/campaigns/{first['id']}")).status_code == 404
+    detail = (await client.get(f"/campaigns/{third['id']}")).json()
+    assert detail["source_campaign_id"] == second["id"]
+    assert [s["id"] for s in detail["sends"]] == [second["id"], third["id"]]
+    assert (await client.get(f"/campaigns/{first['id']}/deliveries")).status_code == 404

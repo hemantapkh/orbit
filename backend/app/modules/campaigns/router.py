@@ -172,10 +172,28 @@ async def update_campaign(
 
 @router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_campaign(campaign_id: int, session: SessionDep, admin: CurrentAdmin):
+    """Delete a broadcast and its delivery history. Not while it's sending: pause or stop first."""
     c = await _get(session, campaign_id)
-    _require(c, {S.DRAFT}, "delete")
-    record(session, admin, "campaign.deleted", "campaign", c.id, name=c.name)
-    await session.delete(c)
+    if c.status == S.RUNNING:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This broadcast is sending. Pause or stop it first."
+        )
+    # Keep resends grouped: if this is the original, the oldest resend becomes the new one.
+    if c.source_campaign_id is None:
+        resends = (
+            await session.scalars(
+                select(Campaign)
+                .where(Campaign.source_campaign_id == c.id)
+                .order_by(Campaign.created_at, Campaign.id)
+            )
+        ).all()
+        if resends:
+            new_root = resends[0]
+            new_root.source_campaign_id = None
+            for r in resends[1:]:
+                r.source_campaign_id = new_root.id
+    record(session, admin, "campaign.deleted", "campaign", c.id, name=c.name, status=c.status)
+    await session.delete(c)  # deliveries and bot links go with it (ON DELETE CASCADE)
     await session.commit()
 
 
