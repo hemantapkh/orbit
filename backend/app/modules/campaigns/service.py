@@ -1,9 +1,9 @@
 import math
 from collections import defaultdict
 from collections.abc import Iterable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import BigInteger, Integer, cast, delete, func, select, update
+from sqlalchemy import BigInteger, Integer, case, cast, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import dialect_name, utcnow
@@ -28,7 +28,7 @@ from app.modules.campaigns.schemas import (
     ErrorGroup,
     ProgressOut,
     RelatedSend,
-    TimelineBucket,
+    TimelinePoint,
 )
 from app.modules.media.models import MediaAsset
 from app.modules.media.service import media_ref_for_bot, remember_file_id
@@ -186,6 +186,15 @@ async def send_once(
 
 # ---- live progress ---------------------------------------------------------------------
 
+# Final outcome of a message, in the words the broadcast page uses. Rate limits never
+# appear here: those messages are retried, not failed.
+_OUTCOME = case(
+    (Delivery.status == DeliveryStatus.SENT, "delivered"),
+    (Delivery.status == DeliveryStatus.BLOCKED, "blocked"),
+    (func.lower(Delivery.error).like("%chat not found%"), "unreachable"),
+    else_="failed",
+).label("outcome")
+
 _BUCKETS = (5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400)
 
 
@@ -205,27 +214,21 @@ async def progress(session: AsyncSession, c: Campaign, rate_per_bot: float) -> P
     elapsed = int((end - start).total_seconds()) if start else None
     size = next((b for b in _BUCKETS if (elapsed or 0) / b <= 60), _BUCKETS[-1])
 
-    timeline: list[TimelineBucket] = []
+    points: list[TimelinePoint] = []
+    first = last = None
     if start:
         bucket = _bucket_expr(Delivery.processed_at, size).label("b")
         rows = await session.execute(
-            select(bucket, Delivery.status, func.count())
+            select(bucket, Delivery.bot_id, _OUTCOME, func.count())
             .where(Delivery.campaign_id == c.id, Delivery.processed_at.is_not(None))
-            .group_by(bucket, Delivery.status)
+            .group_by(bucket, Delivery.bot_id, _OUTCOME)
         )
-        counts: dict[int, list[int]] = defaultdict(lambda: [0, 0])
-        for b, st, n in rows:
-            counts[int(b)][0 if st == DeliveryStatus.SENT else 1] += n
-        first = int(start.timestamp()) // size * size
-        last = int(end.timestamp()) // size * size
-        timeline = [
-            TimelineBucket(
-                start=start.fromtimestamp(t, start.tzinfo),
-                delivered=counts[t][0],
-                not_delivered=counts[t][1],
-            )
-            for t in range(first, last + 1, size)
+        points = [
+            TimelinePoint(t=datetime.fromtimestamp(int(b), UTC), bot_id=bot, outcome=o, count=n)
+            for b, bot, o, n in rows
         ]
+        first = datetime.fromtimestamp(int(start.timestamp()) // size * size, UTC)
+        last = datetime.fromtimestamp(int(end.timestamp()) // size * size, UTC)
 
     window = now - timedelta(seconds=120)
     recent = await session.scalar(
@@ -251,22 +254,25 @@ async def progress(session: AsyncSession, c: Campaign, rate_per_bot: float) -> P
             eta = math.ceil(max(pending_by_bot.values()) / rate_per_bot)
 
     err_rows = await session.execute(
-        select(Delivery.status, Delivery.error, func.count())
+        select(Delivery.bot_id, Delivery.status, Delivery.error, func.count())
         .where(
             Delivery.campaign_id == c.id,
             Delivery.status.in_([DeliveryStatus.FAILED, DeliveryStatus.BLOCKED]),
         )
-        .group_by(Delivery.status, Delivery.error)
+        .group_by(Delivery.bot_id, Delivery.status, Delivery.error)
         .order_by(func.count().desc())
-        .limit(8)
+        .limit(200)
     )
     return ProgressOut(
         bucket_seconds=size,
-        timeline=timeline,
+        start=first,
+        end=last,
+        points=points,
         per_minute=per_minute,
         eta_seconds=eta,
         elapsed_seconds=elapsed,
         errors=[
-            ErrorGroup(status=st, error=err or "Unknown error", count=n) for st, err, n in err_rows
+            ErrorGroup(bot_id=bot, status=st, error=err or "Unknown error", count=n)
+            for bot, st, err, n in err_rows
         ],
     )

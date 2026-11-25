@@ -51,6 +51,7 @@ class FakeTelegram:
         self.sent: list[dict] = []
         self.blocked: set[int] = set()
         self.missing: set[int] = set()
+        self.rejected: set[int] = set()  # Telegram refuses the message itself
         self.rate_limit_once: set[int] = set()
         self.calls = defaultdict(int)
 
@@ -90,6 +91,8 @@ class FakeTelegram:
             return self._err(403, "Forbidden: bot was blocked by the user")
         if chat_id in self.missing:
             return self._err(400, "Bad Request: chat not found")
+        if chat_id in self.rejected:
+            return self._err(400, "Bad Request: can't parse entities")
 
         self.sent.append({"method": method, "token": token, **payload})
         result = {"message_id": len(self.sent), "chat": {"id": chat_id}}

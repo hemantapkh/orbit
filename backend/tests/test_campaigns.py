@@ -186,7 +186,7 @@ async def test_progress_timeline_eta_and_errors(
 
     c = await _campaign(client, [a["id"], b["id"]])
     p = (await client.get(f"/campaigns/{c['id']}/progress")).json()
-    assert p["timeline"] == [] and p["eta_seconds"] is None and p["elapsed_seconds"] is None
+    assert p["points"] == [] and p["start"] is None and p["eta_seconds"] is None
 
     await client.post(f"/campaigns/{c['id']}/launch", json={})
     await delivery_engine.tick()  # first batch only
@@ -197,8 +197,29 @@ async def test_progress_timeline_eta_and_errors(
     await drain(delivery_engine)
     p = (await client.get(f"/campaigns/{c['id']}/progress")).json()
     assert p["eta_seconds"] is None and p["per_minute"] == 0
-    assert sum(x["delivered"] for x in p["timeline"]) == 6
-    assert sum(x["not_delivered"] for x in p["timeline"]) == 2
+    by = {}
+    for pt in p["points"]:
+        by[(pt["bot_id"], pt["outcome"])] = by.get((pt["bot_id"], pt["outcome"]), 0) + pt["count"]
+    assert by == {(a["id"], "delivered"): 4, (a["id"], "blocked"): 2, (b["id"], "delivered"): 2}
+    assert p["start"] is not None and p["end"] >= p["start"]
     assert p["errors"] == [
-        {"status": "blocked", "error": "Forbidden: bot was blocked by the user", "count": 2}
+        {
+            "bot_id": a["id"],
+            "status": "blocked",
+            "error": "Forbidden: bot was blocked by the user",
+            "count": 2,
+        }
     ]
+
+
+async def test_progress_classifies_outcomes(client, telegram_fake, delivery_engine):
+    a, _ = await _setup(client, n_a=4, n_b=1)
+    telegram_fake.blocked.add(100)
+    telegram_fake.missing.add(101)  # chat not found -> unreachable
+    telegram_fake.rejected.add(102)  # anything else -> failed
+    c = await _campaign(client, [a["id"]])
+    await client.post(f"/campaigns/{c['id']}/launch", json={})
+    await drain(delivery_engine)
+    p = (await client.get(f"/campaigns/{c['id']}/progress")).json()
+    outcomes = {pt["outcome"]: pt["count"] for pt in p["points"]}
+    assert outcomes == {"delivered": 1, "blocked": 1, "unreachable": 1, "failed": 1}

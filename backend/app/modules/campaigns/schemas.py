@@ -117,23 +117,32 @@ class TestSendOut(BaseModel):
     message_id: int
 
 
-class TimelineBucket(BaseModel):
-    start: datetime
-    delivered: int
-    not_delivered: int  # failed + blocked
+Outcome = Literal["delivered", "blocked", "unreachable", "failed"]
+
+
+class TimelinePoint(BaseModel):
+    """Messages with one final outcome, from one bot, in one time slice."""
+
+    t: datetime  # slice start
+    bot_id: int
+    outcome: Outcome
+    count: int
 
 
 class ErrorGroup(BaseModel):
+    bot_id: int
     status: str
     error: str
     count: int
 
 
 class ProgressOut(BaseModel):
-    """Live numbers for the broadcast page."""
+    """Live numbers for the broadcast page. The client filters by bot and outcome."""
 
     bucket_seconds: int
-    timeline: list[TimelineBucket]
+    start: datetime | None  # first slice (None before sending starts)
+    end: datetime | None  # last slice
+    points: list[TimelinePoint]
     per_minute: float  # observed over the last 2 minutes; 0 when idle
     eta_seconds: int | None  # None when nothing is pending
     elapsed_seconds: int | None
