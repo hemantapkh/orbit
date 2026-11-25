@@ -69,6 +69,7 @@ export function DatabaseSetup({
   const [url, setUrl] = useState("");
   const [tables, setTables] = useState<TableInfo[] | null>(null);
   const [table, setTable] = useState<TableInfo | null>(null);
+  const [chatColumn, setChatColumn] = useState<string>(existing?.column_map.chat_id ?? "");
 
   // A blank URL while editing means "keep the saved connection".
   const connection = url.trim() ? { database_url: url.trim() } : existing ? { bot_id: botId } : null;
@@ -142,7 +143,7 @@ export function DatabaseSetup({
           <div className="flex justify-end gap-2 border-t border-line pt-5">
             <Button onClick={onCancel}>Cancel</Button>
             <Button variant="primary" onClick={() => introspect.mutate()} disabled={!connection || introspect.isPending}>
-              {introspect.isPending ? "Reading tables…" : "Choose a table"}
+              {introspect.isPending ? "Reading tables…" : "Continue"}
             </Button>
           </div>
         </div>
@@ -151,18 +152,21 @@ export function DatabaseSetup({
         <TablePicker
           tables={tables}
           selected={table}
+          selectedColumn={chatColumn}
           onBack={() => setStep("connect")}
-          onPick={(t) => {
+          onPick={(t, col) => {
             setTable(t);
+            setChatColumn(col);
             setStep("map");
           }}
         />
       )}
       {step === "map" && table && connection && (
         <Mapping
-          key={`${table.schema}.${table.name}`}
+          key={`${table.schema}.${table.name}.${chatColumn}`}
           botId={botId}
           table={table}
+          chatColumn={chatColumn}
           tables={tables ?? []}
           connection={connection}
           existing={existing && existing.table === table.name && existing.schema === table.schema ? existing : null}
@@ -179,8 +183,8 @@ export function DatabaseSetup({
 function Steps({ step, onJump, canMap }: { step: Step; onJump: (s: Step) => void; canMap: boolean }) {
   const steps: [Step, string][] = [
     ["connect", "Connection"],
-    ["table", "Table"],
-    ["map", "Mapping"],
+    ["table", "Telegram user IDs"],
+    ["map", "Details"],
   ];
   const at = steps.findIndex(([s]) => s === step);
   return (
@@ -241,48 +245,89 @@ function ConnectionResult({ test }: { test: { data?: ConnectionInfo; error: Erro
 function TablePicker({
   tables,
   selected,
+  selectedColumn,
   onPick,
   onBack,
 }: {
   tables: TableInfo[];
   selected: TableInfo | null;
-  onPick: (t: TableInfo) => void;
+  selectedColumn: string;
+  onPick: (t: TableInfo, chatColumn: string) => void;
   onBack: () => void;
 }) {
   const [q, setQ] = useState("");
-  const shown = tables.filter((t) => `${t.schema ?? ""}.${t.name}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const [open, setOpen] = useState<TableInfo | null>(selected);
+  const [column, setColumn] = useState(selectedColumn || selected?.suggested.chat_id || "");
+  const term = q.trim().toLowerCase();
+  // Tables that look like they hold Telegram IDs come first.
+  const shown = tables
+    .filter((t) => `${t.schema ?? ""}.${t.name}`.toLowerCase().includes(term))
+    .sort((a, b) => Number(!a.suggested.chat_id) - Number(!b.suggested.chat_id));
+  const same = (a: TableInfo | null, b: TableInfo) => a?.name === b.name && a?.schema === b.schema;
+
   return (
     <div className="space-y-4">
+      <div>
+        <h3 className="font-semibold">Where are the Telegram user IDs?</h3>
+        <p className="mt-1 max-w-[64ch] text-sm text-ink-soft">
+          Pick the table with one row per user, then the column holding their numeric Telegram ID.
+          Other details like names or language can come from linked tables in the next step.
+        </p>
+      </div>
       <div className="relative max-w-sm">
         <Search size={16} className="pointer-events-none absolute top-3 left-3 text-ink-faint" />
         <Input autoFocus placeholder={`Search ${tables.length} tables and views`} className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search tables" />
       </div>
-      <div className="max-h-[420px] divide-y divide-line overflow-y-auto rounded-xl border border-line">
+      <div className="max-h-[440px] divide-y divide-line overflow-y-auto rounded-xl border border-line">
         {shown.length === 0 && <p className="px-4 py-6 text-sm text-ink-soft">No tables match “{q}”.</p>}
         {shown.map((t) => {
-          const hasId = !!t.suggested.chat_id;
-          const isSel = selected?.name === t.name && selected?.schema === t.schema;
+          const isOpen = same(open, t);
           return (
-            <button
-              key={`${t.schema}.${t.name}`}
-              type="button"
-              onClick={() => onPick(t)}
-              className={cx("grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 text-left hover:bg-canvas", isSel && "bg-accent-wash/50")}
-            >
-              <span className="min-w-0">
-                <span className="block truncate">
-                  {t.schema && <span className="text-ink-faint">{t.schema}.</span>}
-                  <span className="font-medium">{t.name}</span>
-                  {t.kind === "view" && <span className="ml-2 rounded bg-line px-1.5 py-0.5 text-xs text-ink-soft">view</span>}
+            <div key={`${t.schema}.${t.name}`} className={cx(isOpen && "bg-accent-wash/40")}>
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                onClick={() => {
+                  setOpen(t);
+                  setColumn(same(selected, t) && selectedColumn ? selectedColumn : (t.suggested.chat_id ?? ""));
+                }}
+                className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 text-left hover:bg-canvas"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate">
+                    {t.schema && <span className="text-ink-faint">{t.schema}.</span>}
+                    <span className="font-medium">{t.name}</span>
+                    {t.kind === "view" && <span className="ml-2 rounded bg-line px-1.5 py-0.5 text-xs text-ink-soft">view</span>}
+                  </span>
+                  <span className="block truncate text-sm text-ink-faint">
+                    {t.suggested.chat_id ? `Telegram IDs likely in ${t.suggested.chat_id}` : `${t.columns.length} columns`}
+                  </span>
                 </span>
-                <span className="block truncate text-sm text-ink-faint">
-                  {t.columns.length} columns{hasId && ` · looks like it has Telegram IDs in ${t.suggested.chat_id}`}
+                <span className="text-right text-sm text-ink-soft">
+                  {t.row_estimate != null ? `${t.schema ? "about " : ""}${fmt(t.row_estimate)} rows` : ""}
                 </span>
-              </span>
-              <span className="text-right text-sm text-ink-soft">
-                {t.row_estimate != null ? `${t.schema ? "about " : ""}${fmt(t.row_estimate)} rows` : ""}
-              </span>
-            </button>
+              </button>
+              {isOpen && (
+                <div className="flex flex-wrap items-end gap-3 px-4 pb-4">
+                  <div className="min-w-[240px] flex-1">
+                    <label htmlFor="chat-col" className="mb-1.5 block text-sm font-medium">
+                      Telegram user ID column
+                    </label>
+                    <select id="chat-col" className={selectCls} value={column} onChange={(e) => setColumn(e.target.value)}>
+                      <option value="">Choose a column</option>
+                      {t.columns.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.name} ({c.type})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button variant="primary" disabled={!column} onClick={() => onPick(t, column)}>
+                    Use {t.name}
+                  </Button>
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
@@ -296,6 +341,7 @@ function TablePicker({
 function Mapping({
   botId,
   table,
+  chatColumn,
   tables,
   connection,
   existing,
@@ -306,6 +352,7 @@ function Mapping({
 }: {
   botId: number;
   table: TableInfo;
+  chatColumn: string;
   tables: TableInfo[];
   connection: { database_url: string } | { bot_id: number };
   existing: BotSourceInfo | null;
@@ -314,7 +361,7 @@ function Mapping({
   onBack: () => void;
   onSaved: (s: BotSourceInfo) => void;
 }) {
-  const initial = (existing?.column_map ?? table.suggested) as Partial<ColumnMap>;
+  const initial = { ...((existing?.column_map ?? table.suggested) as Partial<ColumnMap>), chat_id: chatColumn };
   const [map, setMap] = useState<Partial<Record<MappedField, string | null>>>(initial);
   const [suggested, setSuggested] = useState<Set<MappedField>>(
     () => new Set(existing ? [] : (Object.keys(table.suggested) as MappedField[])),
@@ -360,9 +407,21 @@ function Mapping({
   return (
     <div className="space-y-8">
       <section>
-        <SubHead title="Map the columns" aside={<>From <span className="font-medium text-ink">{table.schema ? `${table.schema}.` : ""}{table.name}</span></>} />
+        <p className="mb-6 flex flex-wrap items-center gap-x-2 rounded-lg bg-canvas px-4 py-3 text-sm ring-1 ring-line">
+          <span className="text-ink-soft">Users from</span>
+          <span className="font-medium">{table.schema ? `${table.schema}.` : ""}{table.name}</span>
+          <span className="text-ink-soft">· Telegram ID in</span>
+          <span className="font-medium">{chatColumn}</span>
+          <button type="button" onClick={onBack} className="ml-auto text-accent-deep underline-offset-4 hover:underline">
+            Change
+          </button>
+        </p>
+        <SubHead
+          title="Details"
+          aside={table.relations.length ? "Optional. Columns can come from this table or tables linked to it." : "Optional."}
+        />
         <div className="divide-y divide-line rounded-xl border border-line">
-          {FIELDS.map((f) => (
+          {FIELDS.filter((f) => f.key !== "chat_id").map((f) => (
             <div key={f.key} className="grid items-center gap-x-6 gap-y-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <div>
                 <label htmlFor={`map-${f.key}`} className="font-medium">
