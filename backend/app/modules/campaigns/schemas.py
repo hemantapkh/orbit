@@ -83,7 +83,18 @@ class RelatedSend(BaseModel):
     stats: DeliveryStats
 
 
+class ShareOut(BaseModel):
+    token: str
+    hide_message: bool
+
+
+class ShareIn(BaseModel):
+    hide_message: bool = False
+    regenerate: bool = False
+
+
 class CampaignDetail(CampaignOut):
+    share: ShareOut | None = None
     bots: list[CampaignBotStats]
     sends: list[RelatedSend]  # every send of this message, oldest first (includes this one)
 

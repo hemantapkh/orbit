@@ -46,6 +46,9 @@ class Campaign(Base, TimestampMixin):
     source_campaign_id: Mapped[int | None] = mapped_column(
         ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Read-only public link (/share/<token>). None = not shared.
+    share_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    share_hide_message: Mapped[bool] = mapped_column(default=False)
 
 
 class TestGroup(Base, TimestampMixin):

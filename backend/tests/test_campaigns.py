@@ -110,8 +110,11 @@ async def test_pause_resume_cancel(client, telegram_fake, delivery_engine, monke
     await delivery_engine.tick()
     assert len(telegram_fake.sent) == 8
 
-    # history is immutable
-    assert (await client.patch(f"/campaigns/{c['id']}", json={"name": "x"})).status_code == 409
+    # history is immutable, but the name can always change
+    locked = await client.patch(f"/campaigns/{c['id']}", json={"message": {"text": "new"}})
+    assert locked.status_code == 409
+    renamed = await client.patch(f"/campaigns/{c['id']}", json={"name": "Renamed"})
+    assert renamed.status_code == 200 and renamed.json()["name"] == "Renamed"
     dup = (await client.post(f"/campaigns/{c['id']}/duplicate")).json()
     assert dup["status"] == "draft" and dup["bot_ids"] == [a["id"]]
 

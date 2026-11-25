@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from app.modules.auth.router import router as auth_router
 from app.modules.auth.service import bootstrap_admin
 from app.modules.bots.router import router as bots_router
 from app.modules.campaigns.engine import DeliveryEngine
+from app.modules.campaigns.public import PRIVATE_HEADERS
+from app.modules.campaigns.public import router as public_shares_router
 from app.modules.campaigns.router import router as campaigns_router
 from app.modules.campaigns.test_groups import router as test_groups_router
 from app.modules.media.router import router as media_router
@@ -33,6 +36,25 @@ ADMIN_ROUTERS = [
     media_router,
     activity_router,
 ]
+
+# No session; the share token in the URL is the credential (see campaigns/public.py).
+PUBLIC_ROUTERS = [public_shares_router]
+
+
+class _HideShareTokens(logging.Filter):
+    """Keep share tokens out of access logs: /share/<token> -> /share/***."""
+
+    _pattern = re.compile(r"(/(?:api/public/)?shares?/)[A-Za-z0-9_-]{20,}")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                self._pattern.sub(r"\1***", a) if isinstance(a, str) else a for a in record.args
+            )
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_HideShareTokens())
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -61,7 +83,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Orbit", version="0.1.0", lifespan=lifespan)
     api = APIRouter(prefix="/api")
-    for r in ADMIN_ROUTERS:
+    for r in ADMIN_ROUTERS + PUBLIC_ROUTERS:
         api.include_router(r)
 
     @api.get("/health", tags=["system"])
@@ -90,6 +112,8 @@ def _serve_console(app: FastAPI, root: Path) -> None:
             immutable = path.startswith("assets/")
             headers = {"Cache-Control": "public, max-age=31536000, immutable"} if immutable else {}
             return FileResponse(file, headers=headers)
+        if path.startswith("share/"):
+            return FileResponse(index, headers=PRIVATE_HEADERS)
         return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 

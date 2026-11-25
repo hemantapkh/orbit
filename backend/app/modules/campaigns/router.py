@@ -1,4 +1,5 @@
 import math
+import secrets
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -25,6 +26,7 @@ from app.modules.campaigns.schemas import (
     EstimateOut,
     LaunchIn,
     ProgressOut,
+    ShareIn,
     TestSendIn,
     TestSendOut,
 )
@@ -182,8 +184,11 @@ async def update_campaign(
     campaign_id: int, body: CampaignUpdate, session: SessionDep, admin: CurrentAdmin
 ):
     c = await _get(session, campaign_id)
-    _require(c, EDITABLE, "edit")
-    if body.name is not None:
+    # Renaming is always allowed; the message and audience are locked once sending starts.
+    if body.model_dump(exclude_none=True, exclude={"name"}):
+        _require(c, EDITABLE, "edit")
+    if body.name is not None and body.name.strip() != c.name:
+        record(session, admin, "campaign.renamed", "campaign", c.id, name=body.name.strip())
         c.name = body.name.strip()
     if body.message is not None:
         await _validate_message(session, body.message, for_launch=c.status == S.SCHEDULED)
@@ -333,6 +338,34 @@ async def campaign_progress(campaign_id: int, session: SessionDep, _: CurrentAdm
     """Timeline, speed, time remaining and grouped errors for the broadcast page."""
     c = await _get(session, campaign_id)
     return await service.progress(session, c, get_settings().send_rate_per_bot)
+
+
+@router.put("/{campaign_id}/share", response_model=CampaignDetail)
+async def share_campaign(campaign_id: int, body: ShareIn, session: SessionDep, admin: CurrentAdmin):
+    """Turn on (or update) the read-only public link. regenerate=true kills the old link."""
+    c = await _get(session, campaign_id)
+    if c.status == S.DRAFT:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Drafts can't be shared. Schedule or send it first."
+        )
+    action = "campaign.share_updated"
+    if c.share_token is None or body.regenerate:
+        action = "campaign.share_regenerated" if c.share_token else "campaign.shared"
+        c.share_token = secrets.token_urlsafe(32)
+    c.share_hide_message = body.hide_message
+    record(session, admin, action, "campaign", c.id, hide_message=body.hide_message)
+    await session.commit()
+    return await service.detail(session, c)
+
+
+@router.delete("/{campaign_id}/share", response_model=CampaignDetail)
+async def unshare_campaign(campaign_id: int, session: SessionDep, admin: CurrentAdmin):
+    c = await _get(session, campaign_id)
+    if c.share_token:
+        c.share_token = None
+        record(session, admin, "campaign.unshared", "campaign", c.id)
+        await session.commit()
+    return await service.detail(session, c)
 
 
 @router.get("/{campaign_id}/deliveries", response_model=DeliveryPage)

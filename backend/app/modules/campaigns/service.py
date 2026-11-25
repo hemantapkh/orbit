@@ -28,6 +28,7 @@ from app.modules.campaigns.schemas import (
     ErrorGroup,
     ProgressOut,
     RelatedSend,
+    ShareOut,
     TimelinePoint,
 )
 from app.modules.media.models import MediaAsset
@@ -130,6 +131,9 @@ async def detail(session: AsyncSession, c: Campaign) -> CampaignDetail:
     out = to_out(c, bot_ids, stats)
     return CampaignDetail(
         **out.model_dump(),
+        share=ShareOut(token=c.share_token, hide_message=c.share_hide_message)
+        if c.share_token
+        else None,
         sends=[
             RelatedSend(
                 id=f.id,
