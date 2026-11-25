@@ -224,6 +224,7 @@ export type BotSourceInfo = {
   table: string | null;
   column_map: Partial<ColumnMap>;
   filters: SourceFilter[];
+  joins: SourceJoin[];
   status: "healthy" | "error" | "unchecked" | null;
   last_error: string | null;
   last_checked_at: string | null;
@@ -241,12 +242,24 @@ export type ConnectionInfo = {
 
 export type ColumnInfo = { name: string; type: string; nullable: boolean };
 
+/** A table linked to another by a foreign key. "many" = any number of rows per user. */
+export type RelationInfo = {
+  table: string;
+  schema: string | null;
+  base_column: string;
+  related_column: string;
+  cardinality: "one" | "many";
+};
+
+export type SourceJoin = { table: string; schema: string | null; base_column: string; related_column: string };
+
 export type TableInfo = {
   schema: string | null;
   name: string;
   kind: "table" | "view";
   row_estimate: number | null;
   columns: ColumnInfo[];
+  relations: RelationInfo[];
   suggested: Partial<Record<MappedField, string>>;
 };
 

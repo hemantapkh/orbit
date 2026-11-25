@@ -10,7 +10,9 @@ import {
   type FilterOp,
   type Introspection,
   type MappedField,
+  type RelationInfo,
   type SourceFilter,
+  type SourceJoin,
   type SourcePreview,
   type TableInfo,
 } from "../../lib/api";
@@ -145,6 +147,7 @@ export function DatabaseSetup({
           key={`${table.schema}.${table.name}`}
           botId={botId}
           table={table}
+          tables={tables ?? []}
           connection={connection}
           existing={existing && existing.table === table.name && existing.schema === table.schema ? existing : null}
           keepUrl={!url.trim()}
@@ -277,6 +280,7 @@ function TablePicker({
 function Mapping({
   botId,
   table,
+  tables,
   connection,
   existing,
   keepUrl,
@@ -286,6 +290,7 @@ function Mapping({
 }: {
   botId: number;
   table: TableInfo;
+  tables: TableInfo[];
   connection: { database_url: string } | { bot_id: number };
   existing: BotSourceInfo | null;
   keepUrl: boolean;
@@ -299,12 +304,13 @@ function Mapping({
     () => new Set(existing ? [] : (Object.keys(table.suggested) as MappedField[])),
   );
   const [filters, setFilters] = useState<SourceFilter[]>(existing?.filters ?? []);
-  const columns = table.columns;
+  const groups = useMemo(() => columnGroups(table, tables), [table, tables]);
+  const mainOnly = groups.slice(0, 1);
 
   const spec = useMemo(() => {
-    const column_map = Object.fromEntries(Object.entries(map).filter(([, v]) => v));
+    const column_map = Object.fromEntries(Object.entries(map).filter(([, v]) => v)) as Record<string, string>;
     const complete = filters.filter((f) => f.column && (!OPS.find((o) => o.value === f.op)?.needsValue || (f.value ?? "") !== ""));
-    return { table: table.name, schema: table.schema, column_map, filters: complete };
+    return { table: table.name, schema: table.schema, column_map, filters: complete, joins: joinsFor(table, [...Object.values(column_map), ...complete.map((f) => f.column)]) };
   }, [map, filters, table]);
   const debounced = useDebounced(spec, 450);
   const ready = !!debounced.column_map.chat_id;
@@ -350,7 +356,7 @@ function Mapping({
                 <p className="text-sm text-ink-faint">{f.help}</p>
               </div>
               <div className="flex items-center gap-2">
-                <ColumnSelect id={`map-${f.key}`} columns={columns} value={map[f.key] ?? ""} onChange={(v) => setField(f.key, v)} required={f.key === "chat_id"} />
+                <ColumnSelect id={`map-${f.key}`} groups={f.key === "chat_id" ? mainOnly : groups} value={map[f.key] ?? ""} onChange={(v) => setField(f.key, v)} required={f.key === "chat_id"} />
                 <span className={cx("w-[70px] shrink-0 text-xs text-accent-deep", !(suggested.has(f.key) && map[f.key]) && "invisible")} title="Picked by matching the column name">
                   suggested
                 </span>
@@ -361,14 +367,19 @@ function Mapping({
       </section>
 
       <section>
-        <SubHead title="Filters" aside="Optional. Only rows that match every filter are included." />
+        <SubHead title="Filters" aside="Optional. Only users who match every filter are included." />
+        {groups.some((g) => g.cardinality === "many") && (
+          <p className="-mt-1 mb-3 text-sm text-ink-faint">
+            A filter on a table with many rows per user means “has at least one row where…”.
+          </p>
+        )}
         <div className="space-y-2">
           {filters.map((f, i) => {
             const op = OPS.find((o) => o.value === f.op)!;
             const update = (p: Partial<SourceFilter>) => setFilters((fs) => fs.map((x, j) => (j === i ? { ...x, ...p } : x)));
             return (
               <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
-                <ColumnSelect aria-label={`Filter ${i + 1} column`} columns={columns} value={f.column} onChange={(column) => update({ column })} placeholder="Column" />
+                <ColumnSelect aria-label={`Filter ${i + 1} column`} groups={groups} value={f.column} onChange={(column) => update({ column })} placeholder="Column" />
                 <select aria-label={`Filter ${i + 1} condition`} className={selectCls} value={f.op} onChange={(e) => update({ op: e.target.value as FilterOp })}>
                   {OPS.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
@@ -436,15 +447,47 @@ function SubHead({ title, aside }: { title: string; aside?: ReactNode }) {
   );
 }
 
+type ColumnGroup = { label: string; prefix: string; cardinality: "main" | "one" | "many"; columns: ColumnInfo[] };
+
+/** The main table's columns, then each linked table's columns as "table.column". */
+function columnGroups(table: TableInfo, tables: TableInfo[]): ColumnGroup[] {
+  const groups: ColumnGroup[] = [{ label: table.name, prefix: "", cardinality: "main", columns: table.columns }];
+  const seen = new Set<string>();
+  for (const rel of table.relations) {
+    if (seen.has(rel.table)) continue; // one link per table keeps "table.column" unambiguous
+    seen.add(rel.table);
+    const other = tables.find((t) => t.name === rel.table && t.schema === rel.schema);
+    if (!other) continue;
+    groups.push({
+      label: `${rel.table}: ${rel.cardinality === "one" ? "one per user" : "any of many per user"}`,
+      prefix: `${rel.table}.`,
+      cardinality: rel.cardinality,
+      columns: other.columns,
+    });
+  }
+  return groups;
+}
+
+/** The links needed for the "table.column" references in use. */
+function joinsFor(table: TableInfo, refs: string[]): SourceJoin[] {
+  const names = new Set(refs.filter((r) => r.includes(".")).map((r) => r.split(".")[0]));
+  const joins: SourceJoin[] = [];
+  for (const name of names) {
+    const rel: RelationInfo | undefined = table.relations.find((r) => r.table === name);
+    if (rel) joins.push({ table: rel.table, schema: rel.schema, base_column: rel.base_column, related_column: rel.related_column });
+  }
+  return joins;
+}
+
 function ColumnSelect({
-  columns,
+  groups,
   value,
   onChange,
   placeholder = "Not mapped",
   required,
   ...rest
 }: {
-  columns: ColumnInfo[];
+  groups: ColumnGroup[];
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -452,14 +495,22 @@ function ColumnSelect({
   id?: string;
   "aria-label"?: string;
 }) {
+  const options = (g: ColumnGroup) =>
+    g.columns.map((c) => (
+      <option key={g.prefix + c.name} value={g.prefix + c.name}>
+        {c.name} ({c.type})
+      </option>
+    ));
   return (
     <select {...rest} className={selectCls} value={value} onChange={(e) => onChange(e.target.value)} required={required}>
       <option value="">{placeholder}</option>
-      {columns.map((c) => (
-        <option key={c.name} value={c.name}>
-          {c.name} ({c.type})
-        </option>
-      ))}
+      {groups.length === 1
+        ? options(groups[0])
+        : groups.map((g) => (
+            <optgroup key={g.label} label={g.label}>
+              {options(g)}
+            </optgroup>
+          ))}
     </select>
   );
 }

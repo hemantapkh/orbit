@@ -97,7 +97,7 @@ export function SourcePanel({ bot }: { bot: Bot }) {
 
 function DatabaseSummary({ source: s, onEdit }: { source: BotSourceInfo; onEdit: () => void }) {
   const healthy = s.status !== "error";
-  const where = [s.schema, s.table].filter(Boolean).join(".");
+  const where = [s.schema, s.table].filter(Boolean).join(".") + (s.joins?.length ? ` + ${s.joins.map((j) => j.table).join(", ")}` : "");
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
