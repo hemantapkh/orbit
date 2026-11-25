@@ -80,3 +80,14 @@ async def test_profile_failure_never_blocks_connecting(client, telegram_fake, mo
     monkeypatch.setattr("app.modules.bots.profile.fetch_profile", boom)
     bot = await connect_bot(client)
     assert bot["avatar_version"] is None and bot["about"] == ""
+
+
+async def test_refresh_all_bots(client, telegram_fake):
+    a = await connect_bot(client, 0)
+    await connect_bot(client, 1)
+    telegram_fake.photo_version = 7
+    bots = (await client.post("/bots/refresh")).json()
+    assert {b["username"] for b in bots} == {"alpha_bot", "beta_bot"}
+    assert all(b["avatar_version"] == "v7" for b in bots)
+    one = (await client.post(f"/bots/{a['id']}/refresh")).json()
+    assert one["token_valid"] is True

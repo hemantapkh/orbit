@@ -20,7 +20,7 @@ from app.modules.bots.profile import avatar_path, sync_profile
 from app.modules.bots.schemas import BotCreate, BotOut, BotUpdate
 from app.modules.campaigns.models import Delivery
 from app.modules.sources.schemas import SubscriberCounts
-from app.modules.sources.service import counts_by_bot
+from app.modules.sources.service import counts_by_bot, database_sources, id_cache
 
 router = APIRouter(prefix="/bots", tags=["bots"])
 
@@ -124,19 +124,41 @@ async def update_bot(
     return await get_bot(bot_id, session, admin)
 
 
-@router.post("/{bot_id}/refresh", response_model=BotOut)
-async def refresh_bot(bot_id: int, session: SessionDep, telegram: TelegramDep, _: CurrentAdmin):
-    """Re-check the token with Telegram and pull the current name/username."""
-    bot = await _get_bot(session, bot_id)
+async def _recheck(session, telegram, bot: Bot) -> None:
+    """Re-check the token, pull name, username, photo and texts, and recount the audience."""
     try:
         me = await identify(telegram, unseal_token(bot.token_encrypted))
         bot.username, bot.display_name, bot.token_valid = me.username, me.display_name, True
         await sync_profile(telegram, bot)
     except TokenRejected:
         bot.token_valid = False
+    bot.last_checked_at = utcnow()
+    if source := (await database_sources(session, [bot.id])).get(bot.id):
+        id_cache.drop(source.id)  # next count reads the bot's database again
+
+
+@router.post("/refresh", response_model=list[BotOut])
+async def refresh_all(session: SessionDep, telegram: TelegramDep, _: CurrentAdmin):
+    """Refresh every bot. One bot failing (e.g. Telegram hiccup) doesn't stop the others."""
+    bots = (await session.scalars(select(Bot).order_by(Bot.display_name))).all()
+    for bot in bots:
+        try:
+            await _recheck(session, telegram, bot)
+        except TelegramUnavailable:
+            pass
+    await session.commit()
+    counts = await counts_by_bot(session)
+    return [to_out(b, counts[b.id]) for b in bots]
+
+
+@router.post("/{bot_id}/refresh", response_model=BotOut)
+async def refresh_bot(bot_id: int, session: SessionDep, telegram: TelegramDep, _: CurrentAdmin):
+    """Refresh one bot from Telegram and recount its audience."""
+    bot = await _get_bot(session, bot_id)
+    try:
+        await _recheck(session, telegram, bot)
     except TelegramUnavailable as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
-    bot.last_checked_at = utcnow()
     await session.commit()
     return await get_bot(bot_id, session, _)
 
