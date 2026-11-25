@@ -3,17 +3,16 @@
 **Everything connected. One place.**
 
 Orbit is a self-hosted console for running many independent Telegram bots: connect each
-bot, see who it can reach, and send broadcasts across any combination of them. Each bot
-keeps its own code and database; Orbit never asks them to migrate.
+bot and its database, see who it can reach, and send broadcasts across any combination of
+them. Each bot keeps its own code and database; Orbit only reads it.
 
 ## What it does today
 
 - **Overview** – active subscribers per bot, distinct people across all bots, recent broadcasts.
 - **Bots** – connect with a token (verified with Telegram, stored encrypted), enable/disable,
-  replace token, rotate integration key.
-- **Subscriber sources** – per bot, either
-  - the **integration API**: the bot pushes subscribers to `POST /api/integration/v1/subscribers`, or
-  - **its own database** (Postgres, read-only): pick a table, map columns, add filters, preview.
+  replace token.
+- **Bot databases** – each bot's audience is read live from its own Postgres database
+  (read-only): pick the user table, map columns (including linked tables), add filters, preview.
 - **Broadcasts** – composer with formatting, media and link buttons; send now or schedule;
   everyone or hand-picked people; pause / resume / stop; per-bot delivery results;
   send the same message again and see every send together.

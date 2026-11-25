@@ -13,7 +13,7 @@ app/
     bots.py                token checks (getMe) and sealing/unsealing bot tokens
     delivery.py            send one message → plain outcome (delivered, blocked, rate limited…)
   modules/
-    auth/ bots/ subscribers/ sources/ media/ campaigns/ overview/ activity/ integrations/
+    auth/ bots/ sources/ media/ campaigns/ overview/ activity/
 ```
 
 ## Telegram boundary
@@ -26,11 +26,11 @@ to a blocked delivery without knowing that Telegram returned HTTP 403.
 Platform-specific data stays explicit where it lives (`bots.telegram_id`, per-bot
 `media_bot_files.file_id`). There is deliberately no provider abstraction.
 
-## Subscriber sources
+## Bot databases
 
-A bot's audience comes from either the platform's `subscribers` table (filled by the
-integration API) or the bot's own database (`bot_sources`), read live with SQLAlchemy
-Core against a reflected table. Recipients who blocked a database-source bot are kept in
+A bot's audience is read live from the bot's own database (`bot_sources`) with SQLAlchemy
+Core against reflected tables: one main table holding the Telegram ID, plus tables linked
+to it by foreign keys. Nothing is copied. Chats that blocked a bot are kept in
 `bot_suppressions`, because Orbit never writes to a bot's database.
 
 ## Delivery
