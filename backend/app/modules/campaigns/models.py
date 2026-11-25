@@ -81,6 +81,7 @@ class Delivery(Base):
     __table_args__ = (
         Index("ix_deliveries_campaign_status", "campaign_id", "status"),
         Index("ix_deliveries_campaign_bot_status", "campaign_id", "bot_id", "status"),
+        Index("ix_deliveries_campaign_processed", "campaign_id", "processed_at"),
     )
 
     id: Mapped[int] = mapped_column(BigId, primary_key=True)
@@ -92,3 +93,5 @@ class Delivery(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # When the outcome was final (sent, failed or blocked): drives the progress timeline.
+    processed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

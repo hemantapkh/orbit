@@ -429,6 +429,7 @@ class DeliveryEngine:
                         "error": o.error,
                         "telegram_message_id": o.message_id,
                         "sent_at": now if o.status == DeliveryStatus.SENT else None,
+                        "processed_at": None if o.status == DeliveryStatus.PENDING else now,
                     }
                     for o in outcomes
                 ],

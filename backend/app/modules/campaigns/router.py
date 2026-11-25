@@ -1,6 +1,9 @@
+import math
+
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
+from app.core.config import get_settings
 from app.core.db import utcnow
 from app.core.deps import SessionDep, TelegramDep
 from app.integrations.telegram.delivery import SendStatus
@@ -18,12 +21,15 @@ from app.modules.campaigns.schemas import (
     CampaignUpdate,
     DeliveryOut,
     DeliveryPage,
+    EstimateBot,
+    EstimateOut,
     LaunchIn,
+    ProgressOut,
     TestSendIn,
     TestSendOut,
 )
 from app.modules.media.models import MediaAsset
-from app.modules.sources.service import active_audience_size
+from app.modules.sources.service import counts_by_bot
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -110,11 +116,17 @@ async def list_campaigns(
     )
 
 
-@router.get("/audience-size")
-async def audience_size(
-    session: SessionDep, _: CurrentAdmin, bot_ids: list[int] = Query(default=[])
-) -> dict[str, int]:
-    return {"active_subscribers": await active_audience_size(session, bot_ids)}
+@router.get("/estimate", response_model=EstimateOut)
+async def estimate(session: SessionDep, _: CurrentAdmin, bot_ids: list[int] = Query(default=[])):
+    """Who a broadcast to these bots would reach, and roughly how long sending takes."""
+    counts = await counts_by_bot(session, bot_ids)
+    per_bot = [EstimateBot(bot_id=b, recipients=counts[b].active) for b in dict.fromkeys(bot_ids)]
+    slowest = max((b.recipients for b in per_bot), default=0)
+    return EstimateOut(
+        recipients=sum(b.recipients for b in per_bot),
+        seconds=math.ceil(slowest / get_settings().send_rate_per_bot),
+        bots=per_bot,
+    )
 
 
 @router.post("", response_model=CampaignDetail, status_code=status.HTTP_201_CREATED)
@@ -291,6 +303,13 @@ async def cancel_campaign(campaign_id: int, session: SessionDep, admin: CurrentA
     await service.skip_pending(session, c.id)
     await session.commit()
     return await service.detail(session, c)
+
+
+@router.get("/{campaign_id}/progress", response_model=ProgressOut)
+async def campaign_progress(campaign_id: int, session: SessionDep, _: CurrentAdmin):
+    """Timeline, speed, time remaining and grouped errors for the broadcast page."""
+    c = await _get(session, campaign_id)
+    return await service.progress(session, c, get_settings().send_rate_per_bot)
 
 
 @router.get("/{campaign_id}/deliveries", response_model=DeliveryPage)

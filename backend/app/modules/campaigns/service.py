@@ -1,22 +1,34 @@
+import math
 from collections import defaultdict
 from collections.abc import Iterable
+from datetime import timedelta
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import BigInteger, Integer, cast, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import dialect_name, utcnow
 from app.integrations.telegram.bots import unseal_token
 from app.integrations.telegram.client import TelegramClient
 from app.integrations.telegram.delivery import SendResult, deliver
 from app.integrations.telegram.messages import MessageContent
 from app.modules.bots.models import Bot
-from app.modules.campaigns.models import Campaign, CampaignBot, Delivery, DeliveryStatus
+from app.modules.campaigns.models import (
+    Campaign,
+    CampaignBot,
+    CampaignStatus,
+    Delivery,
+    DeliveryStatus,
+)
 from app.modules.campaigns.schemas import (
     Audience,
     CampaignBotStats,
     CampaignDetail,
     CampaignOut,
     DeliveryStats,
+    ErrorGroup,
+    ProgressOut,
     RelatedSend,
+    TimelineBucket,
 )
 from app.modules.media.models import MediaAsset
 from app.modules.media.service import media_ref_for_bot, remember_file_id
@@ -170,3 +182,91 @@ async def send_once(
     if asset and result.file_id:
         await remember_file_id(session, asset.id, bot.id, result.file_id)
     return result
+
+
+# ---- live progress ---------------------------------------------------------------------
+
+_BUCKETS = (5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400)
+
+
+def _bucket_expr(column, seconds: int):
+    """Floor a timestamp to `seconds`-wide buckets, as epoch seconds (portable SQL)."""
+    if dialect_name() == "postgresql":
+        epoch = cast(func.floor(func.extract("epoch", column)), BigInteger)
+    else:
+        epoch = cast(func.strftime("%s", column), Integer)
+    return (epoch // seconds) * seconds  # `//` renders as floor division on every dialect
+
+
+async def progress(session: AsyncSession, c: Campaign, rate_per_bot: float) -> ProgressOut:
+    now = utcnow()
+    start = c.started_at
+    end = c.finished_at or now
+    elapsed = int((end - start).total_seconds()) if start else None
+    size = next((b for b in _BUCKETS if (elapsed or 0) / b <= 60), _BUCKETS[-1])
+
+    timeline: list[TimelineBucket] = []
+    if start:
+        bucket = _bucket_expr(Delivery.processed_at, size).label("b")
+        rows = await session.execute(
+            select(bucket, Delivery.status, func.count())
+            .where(Delivery.campaign_id == c.id, Delivery.processed_at.is_not(None))
+            .group_by(bucket, Delivery.status)
+        )
+        counts: dict[int, list[int]] = defaultdict(lambda: [0, 0])
+        for b, st, n in rows:
+            counts[int(b)][0 if st == DeliveryStatus.SENT else 1] += n
+        first = int(start.timestamp()) // size * size
+        last = int(end.timestamp()) // size * size
+        timeline = [
+            TimelineBucket(
+                start=start.fromtimestamp(t, start.tzinfo),
+                delivered=counts[t][0],
+                not_delivered=counts[t][1],
+            )
+            for t in range(first, last + 1, size)
+        ]
+
+    window = now - timedelta(seconds=120)
+    recent = await session.scalar(
+        select(func.count()).where(Delivery.campaign_id == c.id, Delivery.processed_at >= window)
+    )
+    per_minute = (recent or 0) / 2 if c.status == CampaignStatus.RUNNING else 0.0
+
+    pending_by_bot = dict(
+        (
+            await session.execute(
+                select(Delivery.bot_id, func.count())
+                .where(Delivery.campaign_id == c.id, Delivery.status == DeliveryStatus.PENDING)
+                .group_by(Delivery.bot_id)
+            )
+        ).all()
+    )
+    pending = sum(pending_by_bot.values())
+    eta = None
+    if pending:
+        if per_minute > 0:
+            eta = math.ceil(pending / per_minute * 60)
+        else:  # not measured yet (or paused): assume Telegram's rate, bots in parallel
+            eta = math.ceil(max(pending_by_bot.values()) / rate_per_bot)
+
+    err_rows = await session.execute(
+        select(Delivery.status, Delivery.error, func.count())
+        .where(
+            Delivery.campaign_id == c.id,
+            Delivery.status.in_([DeliveryStatus.FAILED, DeliveryStatus.BLOCKED]),
+        )
+        .group_by(Delivery.status, Delivery.error)
+        .order_by(func.count().desc())
+        .limit(8)
+    )
+    return ProgressOut(
+        bucket_seconds=size,
+        timeline=timeline,
+        per_minute=per_minute,
+        eta_seconds=eta,
+        elapsed_seconds=elapsed,
+        errors=[
+            ErrorGroup(status=st, error=err or "Unknown error", count=n) for st, err, n in err_rows
+        ],
+    )

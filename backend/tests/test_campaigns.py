@@ -169,3 +169,36 @@ async def test_standard_markdown_is_sent_as_markdown_v2(client, telegram_fake):
     sent = telegram_fake.sent[-1]
     assert sent["parse_mode"] == "MarkdownV2"
     assert sent["text"] == "*Hi* _there_, v1\\.5\\!"
+
+
+async def test_progress_timeline_eta_and_errors(
+    client, telegram_fake, delivery_engine, monkeypatch
+):
+    a, b = await _setup(client, n_a=6, n_b=2)
+    telegram_fake.blocked.update({101, 102})
+    monkeypatch.setattr(delivery_engine._s, "delivery_batch_size", 3)
+
+    est = (await client.get("/campaigns/estimate", params={"bot_ids": [a["id"], b["id"]]})).json()
+    assert est["recipients"] == 8 and est["bots"] == [
+        {"bot_id": a["id"], "recipients": 6},
+        {"bot_id": b["id"], "recipients": 2},
+    ]
+
+    c = await _campaign(client, [a["id"], b["id"]])
+    p = (await client.get(f"/campaigns/{c['id']}/progress")).json()
+    assert p["timeline"] == [] and p["eta_seconds"] is None and p["elapsed_seconds"] is None
+
+    await client.post(f"/campaigns/{c['id']}/launch", json={})
+    await delivery_engine.tick()  # first batch only
+    p = (await client.get(f"/campaigns/{c['id']}/progress")).json()
+    assert p["eta_seconds"] is not None and p["eta_seconds"] > 0  # 3 of bot A still waiting
+    assert p["per_minute"] > 0
+
+    await drain(delivery_engine)
+    p = (await client.get(f"/campaigns/{c['id']}/progress")).json()
+    assert p["eta_seconds"] is None and p["per_minute"] == 0
+    assert sum(x["delivered"] for x in p["timeline"]) == 6
+    assert sum(x["not_delivered"] for x in p["timeline"]) == 2
+    assert p["errors"] == [
+        {"status": "blocked", "error": "Forbidden: bot was blocked by the user", "count": 2}
+    ]

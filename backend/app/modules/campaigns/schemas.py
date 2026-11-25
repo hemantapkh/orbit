@@ -115,3 +115,37 @@ class TestSendIn(BaseModel):
 
 class TestSendOut(BaseModel):
     message_id: int
+
+
+class TimelineBucket(BaseModel):
+    start: datetime
+    delivered: int
+    not_delivered: int  # failed + blocked
+
+
+class ErrorGroup(BaseModel):
+    status: str
+    error: str
+    count: int
+
+
+class ProgressOut(BaseModel):
+    """Live numbers for the broadcast page."""
+
+    bucket_seconds: int
+    timeline: list[TimelineBucket]
+    per_minute: float  # observed over the last 2 minutes; 0 when idle
+    eta_seconds: int | None  # None when nothing is pending
+    elapsed_seconds: int | None
+    errors: list[ErrorGroup]
+
+
+class EstimateBot(BaseModel):
+    bot_id: int
+    recipients: int
+
+
+class EstimateOut(BaseModel):
+    recipients: int
+    seconds: int  # at Telegram's broadcast rate, bots sending in parallel
+    bots: list[EstimateBot]
