@@ -1,0 +1,32 @@
+# docker compose up --build   →   http://localhost:8000
+services:
+  orbit:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      ORBIT_SECRET_KEY: ${ORBIT_SECRET_KEY:?set ORBIT_SECRET_KEY in .env}
+      ORBIT_DATABASE_URL: postgresql+asyncpg://orbit:${POSTGRES_PASSWORD:-orbit}@db:5432/orbit
+      ORBIT_BOOTSTRAP_ADMIN_EMAIL: ${ORBIT_ADMIN_EMAIL:-admin@example.com}
+      ORBIT_BOOTSTRAP_ADMIN_PASSWORD: ${ORBIT_ADMIN_PASSWORD:?set ORBIT_ADMIN_PASSWORD in .env}
+      ORBIT_COOKIE_SECURE: ${ORBIT_COOKIE_SECURE:-false}  # true once served over HTTPS
+    volumes: ["orbit-data:/data"]
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: orbit
+      POSTGRES_USER: orbit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orbit}
+    volumes: ["db-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbit"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  orbit-data:
+  db-data:
