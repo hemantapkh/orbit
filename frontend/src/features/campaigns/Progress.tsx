@@ -1,14 +1,15 @@
 import { useState } from "react";
-import type { CampaignDetail, ErrorGroup, Outcome, Progress, TimelinePoint } from "../../lib/api";
+import type { CampaignStatus, DeliveryStats, ErrorGroup, Outcome, Progress, TimelinePoint } from "../../lib/api";
 import { clockTime, duration, fmt, pct, when } from "../../lib/format";
 import { cx, fieldClass, Panel } from "../../components/ui";
 import { DeliveryBar } from "./DeliveryBar";
 
 /** The headline for a broadcast, shaped by where it is in its life. */
-export function StatusPanel({ c, progress }: { c: CampaignDetail; progress?: Progress }) {
+type StatusSubject = { status: CampaignStatus; stats: DeliveryStats; scheduled_at: string | null };
+
+export function StatusPanel({ c, reach, progress }: { c: StatusSubject; reach: number; progress?: Progress }) {
   const s = c.stats;
   const processed = s.sent + s.failed + s.blocked + s.skipped;
-  const reach = c.audience.mode === "selected" ? c.audience.recipients.length : c.bots.reduce((n, b) => n + b.audience, 0);
 
   if (c.status === "draft") return <Panel className="p-6 text-ink-soft">Not sent yet.</Panel>;
 
@@ -117,7 +118,7 @@ const OTHER = -1;
 
 type Series = { key: string; label: string; color: string };
 
-export function ProgressInsights({ progress, bots }: { progress: Progress; bots: CampaignDetail["bots"] }) {
+export function ProgressInsights({ progress, bots }: { progress: Progress; bots: { bot_id: number; username: string }[] }) {
   const [bot, setBot] = useState<number | "all">("all");
   const [outcome, setOutcome] = useState<Outcome | "all">("all");
   const [colorBy, setColorBy] = useState<"outcome" | "bot">("outcome");

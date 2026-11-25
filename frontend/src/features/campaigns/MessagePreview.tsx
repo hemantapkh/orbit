@@ -8,10 +8,13 @@ export function MessagePreview({
   message,
   media,
   botName,
+  mediaSrc,
 }: {
   message: MessageContent;
-  media: Media | null;
+  media: Pick<Media, "kind" | "filename" | "size_bytes"> & { id?: number } | null;
   botName?: string;
+  /** where to load the attachment from (defaults to the operator media endpoint) */
+  mediaSrc?: string;
 }) {
   const textRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -26,7 +29,7 @@ export function MessagePreview({
       {botName && <p className="mb-3 text-center text-xs text-ink-soft">{botName}</p>}
       <div className="max-w-[340px]">
         <div className="overflow-hidden rounded-2xl rounded-bl-md bg-white shadow-sm">
-          {media && <MediaBlock media={media} />}
+          {media && <MediaBlock media={media} src={mediaSrc ?? `/api/media/${media.id}/file`} />}
           {empty ? (
             <p className="px-3.5 py-2.5 text-[15px] text-ink-faint">Your message appears here.</p>
           ) : (
@@ -52,8 +55,7 @@ export function MessagePreview({
   );
 }
 
-function MediaBlock({ media }: { media: Media }) {
-  const src = `/api/media/${media.id}/file`;
+function MediaBlock({ media, src }: { media: Pick<Media, "kind" | "filename" | "size_bytes">; src: string }) {
   if (media.kind === "photo" || media.kind === "animation") {
     return <img src={src} alt="" className="max-h-80 w-full object-cover" />;
   }

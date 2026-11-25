@@ -16,6 +16,11 @@ function describe(e: ActivityEntry): string {
     case "campaign.resumed": return "resumed sending";
     case "campaign.cancelled": return "stopped it";
     case "campaign.deleted": return "deleted it";
+    case "campaign.renamed": return `renamed it to “${d.name}”`;
+    case "campaign.shared": return d.hide_message ? "shared a read-only link (message hidden)" : "shared a read-only link";
+    case "campaign.share_regenerated": return "replaced the share link (the old one stopped working)";
+    case "campaign.share_updated": return d.hide_message ? "hid the message on the shared page" : "showed the message on the shared page";
+    case "campaign.unshared": return "stopped sharing";
     case "campaign.test_sent": return `sent a test to ${d.group} (${d.delivered} of ${d.total} delivered)`;
     case "campaign.started": return d.audience === "selected" ? "started sending to the selected people" : "started sending";
     case "campaign.completed": return "finished sending";

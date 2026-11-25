@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Pencil, Share2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api, type CampaignDetail, type Delivery, type Media, type Page, type Progress, type RelatedSend } from "../../lib/api";
 import { fmt, when } from "../../lib/format";
-import { Button, buttonClass, CampaignStatusTag, cx, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
+import { Button, buttonClass, CampaignStatusTag, cx, Dialog, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
 import { ActivityList } from "../activity/ActivityList";
 import { confirmDelete } from "./CampaignsPage";
 import { DeliveryBar } from "./DeliveryBar";
@@ -56,6 +56,8 @@ export function CampaignDetailPage() {
     },
   });
 
+  const [sharing, setSharing] = useState(false);
+
   if (q.isPending) return <Skeleton className="h-96" />;
   if (q.error) return <Notice>{q.error.message}</Notice>;
   const c = q.data;
@@ -82,6 +84,11 @@ export function CampaignDetailPage() {
           Stop
         </Button>
       )}
+      {c.status !== "draft" && (
+        <Button onClick={() => setSharing(true)}>
+          <Share2 size={15} /> {c.share ? "Shared" : "Share"}
+        </Button>
+      )}
       {c.status !== "draft" && c.status !== "running" && (
         <Button variant="danger" onClick={() => confirmDelete(c) && remove.mutate()}>Delete</Button>
       )}
@@ -99,7 +106,7 @@ export function CampaignDetailPage() {
         <ArrowLeft size={15} /> Broadcasts
       </Link>
       <PageHeader
-        title={c.name}
+        title={<EditableTitle campaignId={c.id} name={c.name} onSaved={(d) => qc.setQueryData(key, d)} />}
         lede={
           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <CampaignStatusTag status={c.status} />
@@ -121,7 +128,11 @@ export function CampaignDetailPage() {
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-8">
-          <StatusPanel c={c} progress={progress.data} />
+          <StatusPanel
+            c={c}
+            reach={c.audience.mode === "selected" ? c.audience.recipients.length : c.bots.reduce((n, b) => n + b.audience, 0)}
+            progress={progress.data}
+          />
           {progress.data && <ProgressInsights progress={progress.data} bots={c.bots} />}
 
           <section>
@@ -175,6 +186,15 @@ export function CampaignDetailPage() {
           </Panel>
         </aside>
       </div>
+      <ShareDialog
+        open={sharing}
+        onClose={() => setSharing(false)}
+        c={c}
+        onChange={(d) => {
+          qc.setQueryData(key, d);
+          qc.invalidateQueries({ queryKey: ["activity", "campaign", c.id] });
+        }}
+      />
     </>
   );
 }
@@ -266,5 +286,156 @@ function Sends({ current, sends, bots }: { current: number; sends: RelatedSend[]
         ))}
       </Panel>
     </section>
+  );
+}
+
+/** The broadcast's name, editable in place at any stage. */
+function EditableTitle({ campaignId, name, onSaved }: { campaignId: number; name: string; onSaved: (d: CampaignDetail) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(name);
+  const save = useMutation({
+    mutationFn: (n: string) => api<CampaignDetail>(`/campaigns/${campaignId}`, { method: "PATCH", json: { name: n } }),
+    onSuccess: (d) => {
+      onSaved(d);
+      setEditing(false);
+    },
+  });
+  const commit = () => {
+    const n = value.trim();
+    if (!n || n === name) {
+      setValue(name);
+      setEditing(false);
+      return;
+    }
+    save.mutate(n);
+  };
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setValue(name);
+          setEditing(true);
+        }}
+        className="group -mx-1 inline-flex max-w-full items-center gap-2 rounded-md px-1 text-left hover:bg-line/50"
+        title="Rename"
+      >
+        <span className="truncate">{name}</span>
+        <Pencil size={16} className="shrink-0 text-ink-faint opacity-0 transition-opacity group-hover:opacity-100" />
+        <span className="sr-only">Rename</span>
+      </button>
+    );
+  }
+  return (
+    <span className="block">
+      <input
+        autoFocus
+        aria-label="Broadcast name"
+        value={value}
+        maxLength={160}
+        disabled={save.isPending}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") {
+            setValue(name);
+            setEditing(false);
+          }
+        }}
+        className="-mx-1 w-full rounded-md bg-surface px-1 font-semibold shadow-[0_0_0_4px_rgba(184,145,58,0.16)] outline-none"
+      />
+      {save.error && <span className="mt-1 block text-sm font-normal text-status-error">{save.error.message}</span>}
+    </span>
+  );
+}
+
+function ShareDialog({
+  open,
+  onClose,
+  c,
+  onChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  c: CampaignDetail;
+  onChange: (d: CampaignDetail) => void;
+}) {
+  const [hide, setHide] = useState(c.share?.hide_message ?? false);
+  const [copied, setCopied] = useState(false);
+  const update = useMutation({
+    mutationFn: (body: { hide_message: boolean; regenerate?: boolean }) =>
+      api<CampaignDetail>(`/campaigns/${c.id}/share`, { method: "PUT", json: body }),
+    onSuccess: onChange,
+  });
+  const stop = useMutation({
+    mutationFn: () => api<CampaignDetail>(`/campaigns/${c.id}/share`, { method: "DELETE" }),
+    onSuccess: onChange,
+  });
+  const url = c.share ? `${window.location.origin}/share/${c.share.token}` : null;
+  const error = update.error ?? stop.error;
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Share a read-only view">
+      <div className="space-y-5">
+        <p className="text-sm text-ink-soft">
+          Anyone with the link can watch progress and results, live. They can't pause, edit or send anything,
+          and never see who it went to: no names, usernames or Telegram IDs.
+        </p>
+        {error && <Notice>{error.message}</Notice>}
+        <label className="flex cursor-pointer items-start gap-3 text-[15px]">
+          <input
+            type="checkbox"
+            className="mt-1 size-4 accent-[#17332c]"
+            checked={hide}
+            onChange={(e) => {
+              setHide(e.target.checked);
+              if (c.share) update.mutate({ hide_message: e.target.checked });
+            }}
+          />
+          <span>
+            Hide the message itself
+            <span className="block text-sm text-ink-faint">Viewers see the numbers only. Useful before a scheduled send.</span>
+          </span>
+        </label>
+
+        {url ? (
+          <>
+            <div className="flex items-center gap-2 rounded-lg border border-line bg-canvas py-1.5 pr-1.5 pl-3">
+              <code className="min-w-0 flex-1 truncate font-mono text-sm">{url}</code>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(url);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                {copied ? "Copied" : "Copy link"}
+              </Button>
+            </div>
+            <div className="flex flex-wrap justify-between gap-2 border-t border-line pt-4">
+              <Button
+                variant="ghost"
+                onClick={() => confirm("Replace the link? The current one stops working immediately.") && update.mutate({ hide_message: hide, regenerate: true })}
+                disabled={update.isPending}
+              >
+                Replace link
+              </Button>
+              <Button variant="danger" onClick={() => stop.mutate()} disabled={stop.isPending}>
+                Stop sharing
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="flex justify-end gap-2">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="primary" onClick={() => update.mutate({ hide_message: hide })} disabled={update.isPending}>
+              {update.isPending ? "Creating…" : "Create link"}
+            </Button>
+          </div>
+        )}
+      </div>
+    </Dialog>
   );
 }

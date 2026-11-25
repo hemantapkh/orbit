@@ -131,7 +131,9 @@ export type RelatedSend = {
   stats: DeliveryStats;
 };
 
-export type CampaignDetail = Campaign & { bots: CampaignBotStats[]; sends: RelatedSend[] };
+export type ShareInfo = { token: string; hide_message: boolean };
+
+export type CampaignDetail = Campaign & { bots: CampaignBotStats[]; sends: RelatedSend[]; share: ShareInfo | null };
 
 export type Person = {
   chat_id: number;
@@ -288,3 +290,20 @@ export type Progress = {
   errors: ErrorGroup[];
 };
 export type Estimate = { recipients: number; seconds: number; bots: { bot_id: number; recipients: number }[] };
+
+// ---- public share ---------------------------------------------------------------------
+
+export type PublicBroadcast = {
+  name: string;
+  status: CampaignStatus;
+  audience_mode: "all" | "selected";
+  reach: number;
+  scheduled_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  stats: DeliveryStats;
+  bots: { bot_id: number; username: string; display_name: string; audience: number; stats: DeliveryStats }[];
+  message: MessageContent | null;
+  media: { kind: Media["kind"]; filename: string; size_bytes: number } | null;
+  progress: Progress;
+};
