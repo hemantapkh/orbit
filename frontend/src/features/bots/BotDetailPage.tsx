@@ -2,13 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { api, type Bot, type BotWithKey } from "../../lib/api";
+import { api, type Bot } from "../../lib/api";
 import { ago, fmt, when } from "../../lib/format";
 import { Button, buttonClass, Dialog, Field, Input, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
 import { BotStatus } from "./BotsPage";
 import { ActivityList } from "../activity/ActivityList";
 import { SourcePanel } from "../sources/SourcePanel";
-import { RevealedKey } from "./IntegrationKey";
 
 export function BotDetailPage() {
   const { botId } = useParams();
@@ -16,7 +15,6 @@ export function BotDetailPage() {
   const nav = useNavigate();
   const key = ["bots", botId];
   const bot = useQuery({ queryKey: key, queryFn: () => api<Bot>(`/bots/${botId}`) });
-  const [newKey, setNewKey] = useState<string | null>(null);
   const [tokenOpen, setTokenOpen] = useState(false);
 
   const done = (b: Bot) => {
@@ -32,13 +30,6 @@ export function BotDetailPage() {
     mutationFn: () => api<Bot>(`/bots/${botId}/refresh`, { method: "POST" }),
     onSuccess: done,
   });
-  const rotate = useMutation({
-    mutationFn: () => api<BotWithKey>(`/bots/${botId}/rotate-key`, { method: "POST" }),
-    onSuccess: (b) => {
-      done(b);
-      setNewKey(b.api_key);
-    },
-  });
   const remove = useMutation({
     mutationFn: () => api(`/bots/${botId}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -47,7 +38,7 @@ export function BotDetailPage() {
       nav("/bots");
     },
   });
-  const error = toggle.error ?? refresh.error ?? rotate.error ?? remove.error;
+  const error = toggle.error ?? refresh.error ?? remove.error;
 
   if (bot.isPending) return <Skeleton className="h-72" />;
   if (bot.error) return <Notice>{bot.error.message}</Notice>;
@@ -103,10 +94,9 @@ export function BotDetailPage() {
         <div className="space-y-6">
           <Panel className="p-6">
             <h2 className="mb-5 font-semibold">Subscribers</h2>
-            <dl className={`grid grid-cols-2 gap-6 ${s.source === "integration" ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+            <dl className="grid grid-cols-3 gap-6">
               <Count label="Active" value={s.active} strong />
               <Count label="Blocked the bot" value={s.blocked} />
-              {s.source === "integration" && <Count label="Unsubscribed" value={s.unsubscribed} />}
               <Count label="Unreachable" value={s.unreachable} />
             </dl>
             {s.source_error && (
@@ -117,9 +107,9 @@ export function BotDetailPage() {
               </div>
             )}
             <p className="mt-6 text-sm text-ink-faint">
-              {s.source === "database"
+              {s.connected
                 ? "Counted live from the bot's database, refreshed about once a minute."
-                : `Last report from the bot ${ago(b.last_ingest_at)}.`}{" "}
+                : "Connect the bot's database below to see who it can reach."}{" "}
               Blocked and unreachable counts are learned during broadcasts.
             </p>
           </Panel>
@@ -144,11 +134,6 @@ export function BotDetailPage() {
               action={<Button size="sm" onClick={() => setTokenOpen(true)}>Replace</Button>}
             />
             <Setting
-              title="Rotate integration key"
-              body="Used by the integration API. The old key stops working immediately."
-              action={<Button size="sm" onClick={() => confirm("Rotate the key? The bot will be rejected until you update it.") && rotate.mutate()}>Rotate</Button>}
-            />
-            <Setting
               title="Remove bot"
               body="Only possible before it has sent a broadcast. Otherwise, disable it."
               action={<Button size="sm" variant="danger" onClick={() => confirm(`Remove @${b.username} and its subscriber list?`) && remove.mutate()}>Remove</Button>}
@@ -162,9 +147,6 @@ export function BotDetailPage() {
         <ActivityList entityType="bot" entityId={b.id} />
       </div>
 
-      <Dialog open={!!newKey} onClose={() => setNewKey(null)} title="New integration key">
-        {newKey && <RevealedKey apiKey={newKey} />}
-      </Dialog>
       <ReplaceTokenDialog open={tokenOpen} onClose={() => setTokenOpen(false)} botId={b.id} onDone={done} />
     </>
   );

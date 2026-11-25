@@ -37,10 +37,10 @@ export type Admin = { id: number; email: string; name: string };
 export type SubscriberCounts = {
   active: number;
   blocked: number;
-  unsubscribed: number;
   unreachable: number;
   total: number;
-  source: "integration" | "database";
+  /** false until the bot's database is connected */
+  connected: boolean;
   /** Set when the bot's database couldn't be read; counts are then the last cached ones. */
   source_error: string | null;
 };
@@ -53,14 +53,11 @@ export type Bot = {
   description: string;
   is_active: boolean;
   token_valid: boolean;
-  api_key_prefix: string;
   last_checked_at: string | null;
-  last_ingest_at: string | null;
   created_at: string;
   subscribers: SubscriberCounts;
 };
 
-export type BotWithKey = Bot & { api_key: string };
 
 export type MessageButton = { text: string; url: string };
 
@@ -216,7 +213,7 @@ export type FilterOp = "eq" | "neq" | "is_null" | "not_null" | "is_true" | "is_f
 export type SourceFilter = { column: string; op: FilterOp; value?: string | null };
 
 export type BotSourceInfo = {
-  kind: "integration" | "database";
+  kind: "none" | "database";
   driver: string | null;
   host: string | null;
   database: string | null;

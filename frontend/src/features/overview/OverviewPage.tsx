@@ -31,8 +31,8 @@ function NoBots() {
     <Panel className="px-6 py-14 text-center">
       <h2 className="text-lg font-semibold">Connect your first bot</h2>
       <p className="mx-auto mt-2 max-w-[48ch] text-ink-soft">
-        Add a bot with its token from @BotFather. Its subscriber count shows up here once the bot
-        starts reporting subscribers.
+        Add a bot with its token from @BotFather, then connect the bot's database so Orbit can see
+        who it can reach.
       </p>
       <Link to={"/bots"} className={`mt-6 ${buttonClass("primary")}`}>Connect a bot</Link>
     </Panel>
@@ -64,7 +64,7 @@ function Board({ data }: { data: Overview }) {
                 : b.source_error
                   ? "Can't read the bot's database"
                   : "Online";
-            const gone = b.unsubscribed + b.unreachable;
+            const gone = b.unreachable;
             return (
               <Link
                 key={b.id}
@@ -92,7 +92,9 @@ function Board({ data }: { data: Overview }) {
                   <p className="text-xs text-ink-faint">
                     {b.source_error
                       ? "last known, database unreachable"
-                      : b.total
+                      : !b.connected
+                        ? "database not connected"
+                        : b.total
                         ? `${pct(b.active, b.total)} reachable`
                         : "no subscribers yet"}
                   </p>
@@ -159,7 +161,7 @@ function Legend() {
     <div className="hidden gap-4 text-xs text-ink-soft sm:flex">
       {item("bg-panel", "Active")}
       {item("bg-status-error/70", "Blocked the bot")}
-      {item("bg-line-strong", "Unsubscribed or gone")}
+      {item("bg-line-strong", "Unreachable")}
     </div>
   );
 }

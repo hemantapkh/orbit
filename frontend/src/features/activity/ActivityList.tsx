@@ -28,7 +28,7 @@ function describe(e: ActivityEntry): string {
     case "bot.key_rotated": return "rotated the integration key";
     case "bot.removed": return "removed the bot";
     case "source.saved": return `connected the database table ${d.table}`;
-    case "source.removed": return "switched back to the integration API";
+    case "source.removed": return "disconnected the bot's database";
     case "source.failed": return `couldn't read the bot's database: ${d.error}`;
     default: return e.action;
   }

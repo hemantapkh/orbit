@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Plus, Search, Trash2 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   type BotSourceInfo,
@@ -54,11 +54,14 @@ function useDebounced<T>(value: T, ms: number): T {
 export function DatabaseSetup({
   botId,
   existing,
+  start = "connect",
   onCancel,
   onSaved,
 }: {
   botId: number;
   existing: BotSourceInfo | null;
+  /** "map": edit the saved source straight away, using its saved connection */
+  start?: "connect" | "map";
   onCancel: () => void;
   onSaved: (s: BotSourceInfo) => void;
 }) {
@@ -86,6 +89,19 @@ export function DatabaseSetup({
       }
     },
   });
+
+  // Editing a saved source: read its tables through the saved connection, then open the mapping.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (start === "map" && existing && !autoStarted.current) {
+      autoStarted.current = true;
+      introspect.mutate();
+    }
+  }, [start, existing, introspect]);
+
+  if (start === "map" && step === "connect" && !introspect.error) {
+    return <p className="text-sm text-ink-soft" role="status">Reading the bot's database…</p>;
+  }
 
   return (
     <div>

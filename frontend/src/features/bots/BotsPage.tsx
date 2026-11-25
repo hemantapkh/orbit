@@ -1,10 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
-import { Link } from "react-router";
-import { api, type Bot, type BotWithKey } from "../../lib/api";
-import { ago, fmt } from "../../lib/format";
+import { Link, useNavigate } from "react-router";
+import { api, type Bot } from "../../lib/api";
+import { fmt } from "../../lib/format";
 import { Button, Dialog, Field, Input, StatusDot, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
-import { IntegrationSnippet, RevealedKey } from "./IntegrationKey";
 
 export function BotsPage() {
   const [connecting, setConnecting] = useState(false);
@@ -14,7 +13,7 @@ export function BotsPage() {
     <>
       <PageHeader
         title="Bots"
-        lede="Each bot keeps its own code and database. It reports subscribers here with its integration key, and Orbit sends broadcasts with its token."
+        lede="Each bot keeps its own code and database. Orbit sends with the bot's token and reads who it can reach from its database, read-only."
         actions={<Button variant="primary" onClick={() => setConnecting(true)}>Connect a bot</Button>}
       />
       {bots.error && <Notice>{bots.error.message}</Notice>}
@@ -32,7 +31,7 @@ export function BotsPage() {
                 <th className="px-5 py-3 font-medium">Bot</th>
                 <th className="px-5 py-3 text-right font-medium">Active</th>
                 <th className="px-5 py-3 text-right font-medium">Blocked</th>
-                <th className="px-5 py-3 text-right font-medium">Unsubscribed</th>
+                <th className="px-5 py-3 text-right font-medium">Unreachable</th>
                 <th className="px-5 py-3 font-medium">Source</th>
               </tr>
             </thead>
@@ -51,17 +50,17 @@ export function BotsPage() {
                   <td className="px-5 py-3.5 text-right font-semibold">{fmt(b.subscribers.active)}</td>
                   <td className="px-5 py-3.5 text-right text-ink-soft">{fmt(b.subscribers.blocked)}</td>
                   <td className="px-5 py-3.5 text-right text-ink-soft">
-                    {fmt(b.subscribers.unsubscribed + b.subscribers.unreachable)}
+                    {fmt(b.subscribers.unreachable)}
                   </td>
                   <td className="px-5 py-3.5 text-sm text-ink-soft">
-                    {b.subscribers.source === "database" ? (
+                    {b.subscribers.connected ? (
                       b.subscribers.source_error ? (
                         <span className="text-status-error">Database unreachable</span>
                       ) : (
                         "Database, live"
                       )
                     ) : (
-                      `API, last report ${ago(b.last_ingest_at)}`
+                      <span className="text-ink-faint">Database not connected</span>
                     )}
                   </td>
                 </tr>
@@ -84,15 +83,18 @@ export function BotStatus({ bot }: { bot: Bot }) {
 
 function ConnectBotDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const [token, setToken] = useState("");
   const [description, setDescription] = useState("");
   const connect = useMutation({
-    mutationFn: () => api<BotWithKey>("/bots", { method: "POST", json: { token: token.trim(), description } }),
-    onSuccess: () => {
+    mutationFn: () => api<Bot>("/bots", { method: "POST", json: { token: token.trim(), description } }),
+    onSuccess: (bot) => {
       qc.invalidateQueries({ queryKey: ["bots"] });
       qc.invalidateQueries({ queryKey: ["overview"] });
       setToken("");
       setDescription("");
+      onClose();
+      nav(`/bots/${bot.id}?connect=database`); // next step: connect the bot's database
     },
   });
   const close = () => {
@@ -105,25 +107,9 @@ function ConnectBotDialog({ open, onClose }: { open: boolean; onClose: () => voi
     connect.mutate();
   }
 
-  const created = connect.data;
   return (
-    <Dialog open={open} onClose={close} title={created ? `@${created.username} is connected` : "Connect a bot"}>
-      {created ? (
-        <div className="space-y-5">
-          <RevealedKey apiKey={created.api_key} />
-          <div className="space-y-2">
-            <p className="text-sm text-ink-soft">
-              Have the bot report subscribers as they arrive, up to 1,000 per call. Or connect
-              the bot's own database from its page instead.
-            </p>
-            <IntegrationSnippet apiKey={created.api_key} />
-          </div>
-          <div className="flex justify-end">
-            <Button variant="primary" onClick={close}>Done</Button>
-          </div>
-        </div>
-      ) : (
-        <form onSubmit={submit} className="space-y-5">
+    <Dialog open={open} onClose={close} title="Connect a bot">
+      <form onSubmit={submit} className="space-y-5">
           {connect.error && <Notice>{connect.error.message}</Notice>}
           <Field label="Bot token" htmlFor="token" hint="From @BotFather. Orbit checks it with Telegram and stores it encrypted.">
             <Input
@@ -147,8 +133,7 @@ function ConnectBotDialog({ open, onClose }: { open: boolean; onClose: () => voi
               {connect.isPending ? "Checking token…" : "Connect bot"}
             </Button>
           </div>
-        </form>
-      )}
+      </form>
     </Dialog>
   );
 }
