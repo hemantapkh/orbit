@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Bot, Building2, ChartColumn, Check, ChevronsUpDown, LayoutGrid, LogOut, Megaphone, Plus, Settings } from "lucide-react";
+import { Bot, ChartColumn, Check, ChevronsUpDown, LayoutGrid, LogOut, Megaphone, Plus, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "./errors";
@@ -15,7 +15,6 @@ const NAV = [
   { to: "/bots", label: "Bots", icon: Bot },
   { to: "/broadcasts", label: "Broadcasts", icon: Megaphone },
   { to: "/analytics", label: "Analytics", icon: ChartColumn },
-  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Shell() {
@@ -40,10 +39,9 @@ export function Shell() {
     // bars inside main can't drift. Phones keep normal page scrolling.
     <div className="min-h-screen md:grid md:h-dvh md:grid-cols-[232px_minmax(0,1fr)] md:overflow-hidden">
       <aside className="bg-panel text-panel-ink md:flex md:h-dvh md:flex-col md:overflow-y-auto md:overscroll-none">
-        <div className="flex items-center justify-between px-5 pt-4 pb-2 md:pt-6">
+        <div className="flex items-center justify-between px-5 py-4 md:py-6">
           <OrbitLogo tone="inverse" size={26} />
         </div>
-        <OrgSwitcher />
         <nav aria-label="Main" className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:pb-0">
           {NAV.map(({ to, label, icon: Icon, end }) => (
             <NavLink
@@ -64,16 +62,8 @@ export function Shell() {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-auto hidden border-t border-white/10 px-5 py-4 md:block">
-          <p className="truncate text-sm text-panel-ink">{me.data?.name || me.data?.email}</p>
-          <p className="truncate text-xs text-panel-muted">{me.data?.email}</p>
-          <button
-            type="button"
-            onClick={signOut}
-            className="mt-3 inline-flex items-center gap-2 text-sm text-panel-muted hover:text-panel-ink"
-          >
-            <LogOut size={15} /> Sign out
-          </button>
+        <div className="border-t border-white/10 p-3 md:mt-auto">
+          <AccountMenu onSignOut={signOut} />
         </div>
       </aside>
       <main ref={mainRef} className="md:h-dvh md:overflow-y-auto md:overscroll-none">
@@ -89,8 +79,9 @@ export function Shell() {
 
 const ROLE_LABEL = { owner: "Owner", admin: "Admin", sender: "Sender", viewer: "Viewer" } as const;
 
-/** Which organization you're working in. Switching reloads everything for that org. */
-function OrgSwitcher() {
+/** Bottom-left: who you are, which organization you're in, and everything account-related. */
+function AccountMenu({ onSignOut }: { onSignOut: () => void }) {
+  const me = useMe();
   const { org, orgs } = useOrg();
   const [open, setOpen] = useState(false);
   const qc = useQueryClient();
@@ -116,47 +107,58 @@ function OrgSwitcher() {
     qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
     nav("/");
   };
+  const go = (to: string) => {
+    setOpen(false);
+    nav(to);
+  };
+  const item = "flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-canvas";
 
   return (
-    <div ref={ref} className="relative px-3 pb-3">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2.5 rounded-lg bg-white/[0.06] px-3 py-2 text-left ring-1 ring-white/10 hover:bg-white/[0.1]"
-      >
-        <Building2 size={16} className="shrink-0 text-panel-muted" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-white">{org.name}</span>
-          <span className="block text-xs text-panel-muted">{ROLE_LABEL[org.role]}</span>
-        </span>
-        <ChevronsUpDown size={14} className="shrink-0 text-panel-muted" />
-      </button>
+    <div ref={ref} className="relative">
       {open && (
-        <div role="menu" className="absolute right-3 left-3 z-30 mt-1.5 overflow-hidden rounded-lg border border-line bg-surface py-1 text-sm text-ink shadow-[0_16px_40px_-16px_rgba(19,26,24,0.45)]">
-          <p className="px-3 pt-1.5 pb-1 text-xs text-ink-faint">Organizations</p>
+        <div role="menu" className="absolute bottom-full left-0 z-30 mb-2 w-full min-w-[220px] overflow-hidden rounded-lg border border-line bg-surface py-1 text-sm text-ink shadow-[0_-16px_40px_-16px_rgba(19,26,24,0.45)]">
+          <div className="border-b border-line px-3 pt-1.5 pb-2">
+            <p className="truncate font-medium">{me.data?.name || me.data?.email}</p>
+            {me.data?.name && <p className="truncate text-xs text-ink-faint">{me.data.email}</p>}
+          </div>
+          <p className="px-3 pt-2 pb-1 text-xs text-ink-faint">Organizations</p>
           {orgs.map((o) => (
-            <button key={o.id} role="menuitem" type="button" onClick={() => switchTo(o.id)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-canvas">
+            <button key={o.id} role="menuitem" type="button" onClick={() => switchTo(o.id)} className={item}>
               <span className="min-w-0 flex-1 truncate">{o.name}</span>
               <span className="text-xs text-ink-faint">{ROLE_LABEL[o.role]}</span>
               <Check size={14} className={o.id === org.id ? "text-panel" : "invisible"} />
             </button>
           ))}
-          <div className="my-1 border-t border-line" />
-          <button
-            role="menuitem"
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              nav("/settings?new=org");
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-ink-soft hover:bg-canvas hover:text-ink"
-          >
+          <button role="menuitem" type="button" onClick={() => go("/settings?new=org")} className={`${item} text-ink-soft hover:text-ink`}>
             <Plus size={14} /> New organization
+          </button>
+          <div className="my-1 border-t border-line" />
+          <button role="menuitem" type="button" onClick={() => go("/settings")} className={`${item} text-ink-soft hover:text-ink`}>
+            <Settings size={14} /> Settings
+          </button>
+          <button role="menuitem" type="button" onClick={onSignOut} className={`${item} text-ink-soft hover:text-ink`}>
+            <LogOut size={14} /> Sign out
           </button>
         </div>
       )}
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-white/[0.08]"
+      >
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white/[0.1] text-sm font-semibold text-white">
+          {org.name.trim().charAt(0).toUpperCase()}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-white">{org.name}</span>
+          <span className="block truncate text-xs text-panel-muted">
+            {ROLE_LABEL[org.role]} · {me.data?.email}
+          </span>
+        </span>
+        <ChevronsUpDown size={14} className="shrink-0 text-panel-muted" />
+      </button>
     </div>
   );
 }
