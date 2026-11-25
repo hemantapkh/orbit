@@ -54,3 +54,12 @@ async def test_disabled_bot_cannot_ingest(client):
     await client.patch(f"/bots/{a['id']}", json={"is_active": False})
     assert (await push(client, a["api_key"], [1])).status_code == 403
 
+
+def test_plain_postgres_urls_use_asyncpg():
+    from app.core.config import Settings
+
+    for raw in ("postgres://u:p@db:5432/orbit", "postgresql://u:p@db:5432/orbit"):
+        assert Settings(database_url=raw).database_url == "postgresql+asyncpg://u:p@db:5432/orbit"
+    assert (
+        Settings(database_url="sqlite+aiosqlite:///x.db").database_url == "sqlite+aiosqlite:///x.db"
+    )

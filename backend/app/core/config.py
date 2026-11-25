@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_SECRET = "dev-insecure-secret-change-me-before-deploying"
@@ -32,6 +33,15 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     bootstrap_admin_email: str | None = None
     bootstrap_admin_password: str | None = None
+
+    @field_validator("database_url")
+    @classmethod
+    def _async_driver(cls, url: str) -> str:
+        """Accept plain postgres:// URLs (as Dokploy, Heroku etc. give) and use asyncpg."""
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+asyncpg://" + url[len(prefix) :]
+        return url
 
     @property
     def is_production(self) -> bool:
