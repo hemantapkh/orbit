@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy import exists, select
 
 from app.core.db import utcnow
@@ -15,6 +16,7 @@ from app.integrations.telegram.client import TelegramClient
 from app.modules.activity.service import record
 from app.modules.auth.deps import CurrentAdmin
 from app.modules.bots.models import Bot
+from app.modules.bots.profile import avatar_path, sync_profile
 from app.modules.bots.schemas import BotCreate, BotOut, BotUpdate
 from app.modules.campaigns.models import Delivery
 from app.modules.sources.schemas import SubscriberCounts
@@ -31,6 +33,9 @@ def to_out(bot: Bot, counts: SubscriberCounts) -> BotOut:
         display_name=bot.display_name,
         description=bot.description,
         is_active=bot.is_active,
+        about=bot.about or "",
+        telegram_description=bot.telegram_description or "",
+        avatar_version=bot.avatar_version,
         token_valid=bot.token_valid,
         last_checked_at=bot.last_checked_at,
         created_at=bot.created_at,
@@ -78,6 +83,7 @@ async def connect_bot(
     )
     session.add(bot)
     await session.flush()
+    await sync_profile(telegram, bot)
     record(session, admin, "bot.connected", "bot", bot.id, username=bot.username)
     await session.commit()
     await session.refresh(bot)
@@ -129,6 +135,7 @@ async def refresh_bot(bot_id: int, session: SessionDep, telegram: TelegramDep, _
     try:
         me = await identify(telegram, unseal_token(bot.token_encrypted))
         bot.username, bot.display_name, bot.token_valid = me.username, me.display_name, True
+        await sync_profile(telegram, bot)
     except TokenRejected:
         bot.token_valid = False
     except TelegramUnavailable as exc:
@@ -136,6 +143,21 @@ async def refresh_bot(bot_id: int, session: SessionDep, telegram: TelegramDep, _
     bot.last_checked_at = utcnow()
     await session.commit()
     return await get_bot(bot_id, session, _)
+
+
+@router.get("/{bot_id}/avatar")
+async def bot_avatar(bot_id: int, session: SessionDep, _: CurrentAdmin):
+    """The bot's Telegram profile photo, served by Orbit (Telegram's link holds the token)."""
+    bot = await _get_bot(session, bot_id)
+    path = avatar_path(bot.id)
+    if not bot.avatar_version or not path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No photo")
+    # The URL carries ?v=<version>, so it can be cached until the photo changes.
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
 
 
 @router.delete("/{bot_id}", status_code=status.HTTP_204_NO_CONTENT)

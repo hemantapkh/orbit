@@ -18,5 +18,9 @@ class Bot(Base, TimestampMixin):
     description: Mapped[str] = mapped_column(Text, default="")
     token_encrypted: Mapped[str] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # From Telegram (refreshed on connect and "Check now"): profile texts and photo.
+    about: Mapped[str] = mapped_column(Text, default="")
+    telegram_description: Mapped[str] = mapped_column(Text, default="")
+    avatar_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     token_valid: Mapped[bool] = mapped_column(Boolean, default=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

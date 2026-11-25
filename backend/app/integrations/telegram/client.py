@@ -72,6 +72,19 @@ class TelegramClient:
             )
         return body["result"]
 
+    async def download(self, token: str, file_id: str, max_bytes: int = 5_000_000) -> bytes:
+        """Fetch a file's bytes. The download URL contains the token: never hand it out."""
+        info = await self.call(token, "getFile", {"file_id": file_id})
+        if (info.get("file_size") or 0) > max_bytes:
+            raise TelegramError(0, "file too large")
+        try:
+            resp = await self._http.get(f"{self._base}/file/bot{token}/{info['file_path']}")
+        except httpx.HTTPError as exc:
+            raise TelegramError(0, f"network error: {exc.__class__.__name__}") from exc
+        if resp.status_code != 200 or len(resp.content) > max_bytes:
+            raise TelegramError(resp.status_code, "couldn't download file")
+        return resp.content
+
     async def get_me(self, token: str) -> dict[str, Any]:
         return await self.call(token, "getMe")
 

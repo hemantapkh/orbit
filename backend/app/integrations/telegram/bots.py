@@ -74,3 +74,41 @@ async def look_up_chat(client: TelegramClient, token: str, chat_id: int) -> Chat
     return ChatInfo(
         chat_id=chat["id"], kind=chat.get("type", "private"), title=name or str(chat_id)
     )
+
+
+@dataclass(frozen=True, slots=True)
+class BotProfile:
+    about: str  # short description, shown on the bot's profile
+    description: str  # shown in an empty chat, before Start
+    photo_unique_id: str | None
+    photo: bytes | None  # largest size up to ~640px, JPEG
+
+
+async def fetch_profile(client: TelegramClient, token: str, telegram_id: int) -> BotProfile:
+    """Everything here is optional on Telegram's side; missing pieces come back empty."""
+
+    async def text(method: str, key: str) -> str:
+        try:
+            return (await client.call(token, method)).get(key) or ""
+        except TelegramError:
+            return ""
+
+    about = await text("getMyShortDescription", "short_description")
+    description = await text("getMyDescription", "description")
+    unique_id, photo = None, None
+    try:
+        photos = await client.call(
+            token, "getUserProfilePhotos", {"user_id": telegram_id, "limit": 1}
+        )
+        if photos.get("photos"):
+            sizes = photos["photos"][0]
+            best = max(
+                (s for s in sizes if s.get("width", 0) <= 640),
+                key=lambda s: s["width"],
+                default=sizes[-1],
+            )
+            unique_id = best.get("file_unique_id")
+            photo = await client.download(token, best["file_id"])
+    except TelegramError:
+        pass
+    return BotProfile(about=about, description=description, photo_unique_id=unique_id, photo=photo)

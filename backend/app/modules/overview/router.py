@@ -23,6 +23,7 @@ class BotLine(BaseModel):
     display_name: str
     is_active: bool
     token_valid: bool
+    avatar_version: str | None
     active: int
     blocked: int
     unreachable: int
@@ -61,6 +62,7 @@ async def overview(session: SessionDep, _: CurrentAdmin):
                 display_name=b.display_name,
                 is_active=b.is_active,
                 token_valid=b.token_valid,
+                avatar_version=b.avatar_version,
                 **counts[b.id].model_dump(),
             )
             for b in bots

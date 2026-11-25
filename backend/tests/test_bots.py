@@ -51,3 +51,32 @@ def test_plain_postgres_urls_use_asyncpg():
     assert (
         Settings(database_url="sqlite+aiosqlite:///x.db").database_url == "sqlite+aiosqlite:///x.db"
     )
+
+
+async def test_bot_profile_photo_and_texts(client, telegram_fake):
+    bot = await connect_bot(client)
+    assert bot["about"] == "About Alpha" and bot["telegram_description"] == "Press Start to begin."
+    assert bot["avatar_version"] == "v1"
+    photo = await client.get(f"/bots/{bot['id']}/avatar")
+    assert photo.status_code == 200 and photo.content == telegram_fake.PHOTO
+    assert photo.headers["content-type"] == "image/jpeg"
+    # the Telegram file link (which contains the token) never reaches the client
+    assert "AAAA" not in photo.text and "file/bot" not in str(photo.headers)
+
+    telegram_fake.photo_version = 2
+    refreshed = (await client.post(f"/bots/{bot['id']}/refresh")).json()
+    assert refreshed["avatar_version"] == "v2"
+
+    telegram_fake.with_photo = False
+    gone = (await client.post(f"/bots/{bot['id']}/refresh")).json()
+    assert gone["avatar_version"] is None
+    assert (await client.get(f"/bots/{bot['id']}/avatar")).status_code == 404
+
+
+async def test_profile_failure_never_blocks_connecting(client, telegram_fake, monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("telegram is down")
+
+    monkeypatch.setattr("app.modules.bots.profile.fetch_profile", boom)
+    bot = await connect_bot(client)
+    assert bot["avatar_version"] is None and bot["about"] == ""

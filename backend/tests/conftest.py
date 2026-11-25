@@ -54,8 +54,15 @@ class FakeTelegram:
         self.rejected: set[int] = set()  # Telegram refuses the message itself
         self.rate_limit_once: set[int] = set()
         self.calls = defaultdict(int)
+        self.with_photo = True
+        self.photo_version = 1
+
+    PHOTO = b"\xff\xd8\xff\xe0fake-jpeg"
 
     def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/file/bot"):
+            self.calls["download"] += 1
+            return httpx.Response(200, content=self.PHOTO)
         m = re.match(r"/bot([^/]+)/(\w+)", request.url.path)
         token, method = m.group(1), m.group(2)
         self.calls[method] += 1
@@ -63,6 +70,33 @@ class FakeTelegram:
             return self._err(401, "Unauthorized")
         if method == "getMe":
             return self._ok({**TOKENS[token], "is_bot": True})
+        if method == "getMyShortDescription":
+            return self._ok({"short_description": f"About {TOKENS[token]['first_name']}"})
+        if method == "getMyDescription":
+            return self._ok({"description": "Press Start to begin."})
+        if method == "getUserProfilePhotos":
+            if not self.with_photo:
+                return self._ok({"total_count": 0, "photos": []})
+            sizes = [
+                {
+                    "file_id": f"small-{token[:6]}",
+                    "file_unique_id": "s1",
+                    "width": 160,
+                    "height": 160,
+                },
+                {
+                    "file_id": f"big-{token[:6]}",
+                    "file_unique_id": f"v{self.photo_version}",
+                    "width": 640,
+                    "height": 640,
+                },
+                {"file_id": "huge", "file_unique_id": "h1", "width": 1280, "height": 1280},
+            ]
+            return self._ok({"total_count": 1, "photos": [sizes]})
+        if method == "getFile":
+            return self._ok(
+                {"file_id": "x", "file_size": len(self.PHOTO), "file_path": "photos/p.jpg"}
+            )
         if method == "getChat":
             chat_id = json.loads(request.content)["chat_id"]
             if chat_id in self.missing:

@@ -24,6 +24,9 @@ class BotOut(BaseModel):
     description: str
     is_active: bool
     token_valid: bool
+    about: str  # Telegram short description ("About")
+    telegram_description: str  # shown in an empty chat, before Start
+    avatar_version: str | None  # None: no photo; changes when the photo changes
     last_checked_at: datetime | None
     created_at: datetime
     subscribers: SubscriberCounts
