@@ -9,13 +9,13 @@ import { ago, fmt, when } from "../../lib/format";
 
 /** Filters live in the URL, so a filtered list can be bookmarked or shared with the team. */
 /** Filters in the panel. Each holds one URL parameter; "" means no filter. */
-const FILTERS: { key: string; label: string; options: [string, string][] }[] = [
-  { key: "kind", label: "Type", options: [["", "Any"], ["people", "People"], ["groups", "Groups"], ["channels", "Channels"]] },
+const FILTERS: { key: string; label: string; options: [string, string][]; multi?: true }[] = [
+  { key: "kind", label: "Type", multi: true, options: [["people", "People"], ["groups", "Groups"], ["channels", "Channels"]] },
   {
     key: "status",
     label: "Status",
+    multi: true,
     options: [
-      ["", "Any"],
       ["can_receive", "Can receive"],
       ["blocked", "Blocked the bot"],
       ["deleted", "Deleted account"],
@@ -39,7 +39,6 @@ const FILTERS: { key: string; label: string; options: [string, string][] }[] = [
   },
   { key: "joined", label: "Joined", options: [["", "Any time"], ["24h", "In the last 24 hours"], ["7d", "In the last 7 days"], ["30d", "In the last 30 days"], ["90d", "In the last 90 days"]] },
   { key: "premium", label: "Premium", options: [["", "Any"], ["true", "Premium"], ["false", "Not Premium"]] },
-  { key: "multi", label: "Bots used", options: [["", "Any number"], ["true", "2 or more bots"]] },
 ];
 const PANEL_KEYS = [...FILTERS.map((f) => f.key), "language"];
 /** Columns that start newest/most first; the rest start A to Z (type: people first). */
@@ -67,10 +66,24 @@ export function PeoplePage() {
     setParams(
       (p) => {
         const next = new URLSearchParams(p);
-        if (key.startsWith("bot:")) next.delete("bot", key.slice(4));  // one of several bots
+        const one = key.indexOf(":");
+        if (one > 0) next.delete(key.slice(0, one), key.slice(one + 1));  // one of several values
         else if (value) next.set(key, value);
         else next.delete(key);
         if (key !== "page") next.delete("page");
+        return next;
+      },
+      { replace: true },
+    );
+
+  /** Replace every value of a repeated parameter (bot=1&bot=2, kind=people&kind=groups). */
+  const setAll = (key: string, values: string[]) =>
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p);
+        next.delete(key);
+        for (const v of values) next.append(key, v);
+        next.delete("page");
         return next;
       },
       { replace: true },
@@ -135,20 +148,9 @@ export function PeoplePage() {
         <BotPicker
           bots={bots.data ?? []}
           picked={params.getAll("bot").map(Number)}
-          onChange={(ids) =>
-            setParams(
-              (p) => {
-                const next = new URLSearchParams(p);
-                next.delete("bot");
-                for (const id of ids) next.append("bot", String(id));
-                next.delete("page");
-                return next;
-              },
-              { replace: true },
-            )
-          }
+          onChange={(ids) => setAll("bot", ids.map(String))}
         />
-        <FilterPanel params={params} set={set} />
+        <FilterPanel params={params} set={set} setAll={setAll} />
       </div>
 
       <ActiveFilters
@@ -356,11 +358,12 @@ function Fact({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-/** "Filters" button with a count; opens a small panel with the rest of the filters. */
-function FilterPanel({ params, set }: { params: URLSearchParams; set: (k: string, v: string) => void }) {
+/** "Filters" button with a count; opens a small panel with the rest of the filters. Type,
+ * status and language take several values (a chat matching any of them is shown). */
+function FilterPanel({ params, set, setAll }: { params: URLSearchParams; set: (k: string, v: string) => void; setAll: (k: string, v: string[]) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const count = PANEL_KEYS.filter((k) => params.get(k)).length;
+  const count = PANEL_KEYS.filter((k) => params.getAll(k).length > 0).length;
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent | KeyboardEvent) => {
@@ -373,6 +376,9 @@ function FilterPanel({ params, set }: { params: URLSearchParams; set: (k: string
       document.removeEventListener("keydown", close);
     };
   }, [open]);
+  const languages = params.getAll("language");
+  const saveLanguages = (text: string) =>
+    setAll("language", [...new Set(text.split(/[\s,]+/).map((c) => c.trim().toLowerCase()).filter(Boolean))]);
   return (
     <div ref={ref} className="relative">
       <Button onClick={() => setOpen((o) => !o)} aria-expanded={open} className={cx(count > 0 && "border-accent")}>
@@ -382,21 +388,57 @@ function FilterPanel({ params, set }: { params: URLSearchParams; set: (k: string
       </Button>
       {open && (
         <div className="absolute right-0 z-20 mt-2 w-[min(560px,calc(100vw-32px))] rounded-xl border border-line bg-surface p-4 shadow-[0_18px_40px_-18px_rgba(23,33,30,0.35)]">
-          <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-            {FILTERS.map((f) => (
-              <label key={f.key} className="text-sm">
-                <span className="mb-1 block text-ink-soft">{f.label}</span>
-                <select value={params.get(f.key) ?? ""} onChange={(e) => set(f.key, e.target.value)} className={cx(fieldClass, "h-9 text-sm")}>
-                  {f.options.map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
-                  ))}
-                </select>
+          <div className="space-y-4">
+            {FILTERS.filter((f) => f.multi).map((f) => {
+              const on = params.getAll(f.key);
+              return (
+                <fieldset key={f.key} className="text-sm">
+                  <legend className="mb-1.5 text-ink-soft">{f.label} <span className="text-ink-faint">· any of</span></legend>
+                  <div className="flex flex-wrap gap-1.5">
+                    {f.options.map(([v, l]) => {
+                      const pressed = on.includes(v);
+                      return (
+                        <button
+                          key={v}
+                          type="button"
+                          aria-pressed={pressed}
+                          onClick={() => setAll(f.key, pressed ? on.filter((x) => x !== v) : [...on, v])}
+                          className={cx(
+                            "rounded-full border px-3 py-1 transition-colors",
+                            pressed ? "border-accent bg-accent-wash text-accent-deep" : "border-line hover:border-line-strong",
+                          )}
+                        >
+                          {l}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              );
+            })}
+            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+              {FILTERS.filter((f) => !f.multi).map((f) => (
+                <label key={f.key} className="text-sm">
+                  <span className="mb-1 block text-ink-soft">{f.label}</span>
+                  <select value={params.get(f.key) ?? ""} onChange={(e) => set(f.key, e.target.value)} className={cx(fieldClass, "h-9 text-sm")}>
+                    {f.options.map(([v, l]) => (
+                      <option key={v} value={v}>{l}</option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+              <label className="text-sm">
+                <span className="mb-1 block text-ink-soft">Language <span className="text-ink-faint">· any of</span></span>
+                <Input
+                  key={languages.join(",")}
+                  defaultValue={languages.join(", ")}
+                  onBlur={(e) => saveLanguages(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && saveLanguages(e.currentTarget.value)}
+                  placeholder="Codes, e.g. en, ne"
+                  className="h-9 text-sm"
+                />
               </label>
-            ))}
-            <label className="text-sm">
-              <span className="mb-1 block text-ink-soft">Language</span>
-              <Input key={params.get("language") ?? ""} defaultValue={params.get("language") ?? ""} onBlur={(e) => set("language", e.target.value.trim())} onKeyDown={(e) => e.key === "Enter" && set("language", e.currentTarget.value.trim())} placeholder="Code, e.g. en or ne" className="h-9 text-sm" />
-            </label>
+            </div>
           </div>
           <div className="mt-4 flex justify-end">
             <Button size="sm" variant="primary" onClick={() => setOpen(false)}>Done</Button>
@@ -413,11 +455,12 @@ function ActiveFilters({ params, set, onClear, botName }: { params: URLSearchPar
   if (params.get("q")) chips.push({ key: "q", text: `“${params.get("q")}”` });
   for (const id of params.getAll("bot")) chips.push({ key: `bot:${id}`, text: botName(id) });
   for (const f of FILTERS) {
-    const v = params.get(f.key);
-    const label = f.options.find(([o]) => o === v)?.[1];
-    if (v && label) chips.push({ key: f.key, text: `${f.label}: ${label}` });
+    for (const v of params.getAll(f.key)) {
+      const label = f.options.find(([o]) => o === v)?.[1];
+      if (label) chips.push({ key: f.multi ? `${f.key}:${v}` : f.key, text: `${f.label}: ${label}` });
+    }
   }
-  if (params.get("language")) chips.push({ key: "language", text: `Language: ${params.get("language")}` });
+  for (const code of params.getAll("language")) chips.push({ key: `language:${code}`, text: `Language: ${code}` });
   if (!chips.length) return null;
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">

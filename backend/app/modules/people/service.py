@@ -63,18 +63,21 @@ def _conditions(
     if f.q and f.q.strip():
         found = search_conditions(src, spec, f.q)
         conds.append(or_(*found) if found else false())
-    if f.kind:
+    if f.kinds:
         if m.chat_type:
             kind = func.lower(cast(_value(src, m.chat_type), String))
-            conds.append(kind.in_(KINDS[f.kind]))
-        elif f.kind != "people":  # without a type every chat is taken to be a person
+            conds.append(kind.in_([t for k in f.kinds for t in KINDS[k]]))
+        elif f.kinds != ["people"]:  # without a type every chat is taken to be a person
             missing.append("Chat type")
-    if f.status:
-        clause = category_clause(src, spec, f.status, orbit)
-        if clause is None:
-            missing.append("Bot's status")
+    if f.statuses:
+        # Categories this bot can tell; it's left out only if it can tell none of them.
+        clauses = [
+            c for st in f.statuses if (c := category_clause(src, spec, st, orbit)) is not None
+        ]
+        if clauses:
+            conds.append(or_(*clauses))
         else:
-            conds.append(clause)
+            missing.append("Bot's status")
     if f.active:
         if not m.last_active_at:
             missing.append("Last active")
@@ -91,12 +94,13 @@ def _conditions(
             missing.append("Joined at")
         else:
             conds.append(at_or_after(src, m.joined_at, dialect, now - WINDOWS[f.joined]))
-    if f.language:
+    codes = [c.strip().lower() for c in f.languages if c.strip()]
+    if codes:
         if not m.language_code:
             missing.append("Language")
         else:
             lang = func.lower(cast(_value(src, m.language_code), String))
-            conds.append(lang.like(f"{f.language.strip().lower()}%"))
+            conds.append(or_(*(lang.like(f"{code}%") for code in codes)))
     if f.premium is not None:
         if not m.is_premium:
             missing.append("Premium")
@@ -208,10 +212,11 @@ async def _merged(session: AsyncSession, org_id: int, f: PeopleQuery):
         if missing:
             skipped[bot_id] = missing
             continue
-        # Orbit's own failures override the bot's "can receive".
-        if f.status == "can_receive":
-            gone = {c for ids in orbit[bot_id].values() for c in ids}
-            rows = [r for r in rows if r[0] not in gone]
+        # Orbit's own failures override the bot's "can receive": keep a chat Orbit saw fail
+        # only if that failure is one of the statuses asked for.
+        if f.statuses:
+            failed = {c: why for why, ids in orbit[bot_id].items() for c in ids}
+            rows = [r for r in rows if r[0] not in failed or failed[r[0]] in f.statuses]
         for cid, seen, value in rows:
             entry = people.setdefault(cid, [cid, [], None, None])
             entry[1].append(bot_id)

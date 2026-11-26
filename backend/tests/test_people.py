@@ -120,3 +120,18 @@ async def test_several_bots_at_once(client):
     assert (await people(client, bot=[b]))["total"] == 3  # 1, 5 and 77
     only_b = await people(client, bot=[b], multi="true")
     assert only_b["total"] == 0  # "on 2 or more" counts only the bots picked
+
+
+async def test_several_values_per_filter(client):
+    a, b = await two_bots(client)
+
+    async def ids(**params):
+        return {p["chat_id"] for p in (await people(client, **params))["items"]}
+
+    assert await ids(status=["blocked", "deleted"], bot=a) == {2, 3}
+    assert await ids(kind=["groups", "channels"], bot=a) == {-100, -200}
+    assert await ids(language=["en", "ne"], bot=a) == set()  # the test bot stores no language
+    # A bot that can tell only some of the statuses still answers for those.
+    mixed = await people(client, status=["can_receive", "blocked"])
+    assert {p["chat_id"] for p in mixed["items"]} == {1, 2, 5, 77, -100}
+    assert mixed["skipped"] == {}

@@ -16,11 +16,11 @@ class PeopleQuery(BaseModel):
 
     bots: list[int] = Field(default_factory=list)  # empty: every bot with a database
     q: str | None = Field(default=None, max_length=100)
-    kind: ChatKind | None = None
-    status: Category | None = None
+    kinds: list[ChatKind] = Field(default_factory=list)  # any of these
+    statuses: list[Category] = Field(default_factory=list)  # any of these
     active: Activity | None = None
     joined: Joined | None = None
-    language: str | None = Field(default=None, max_length=16)
+    languages: list[str] = Field(default_factory=list, max_length=20)  # code prefixes
     premium: bool | None = None
     multi: bool = False  # on two or more of the bots
     sort: Sort = "last_active"
