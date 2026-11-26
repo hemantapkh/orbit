@@ -18,6 +18,10 @@ bot's own database, read-only. From one place you can see who every bot can reac
 broadcast through any combination of bots, and follow it as it's delivered. Your bots
 don't change, and Orbit never writes to their databases.
 
+<p align="center">
+  <img src="docs/screenshots/overview.png" alt="Overview: who each bot can reach, and the last 24 hours of joins, activity and losses" width="900">
+</p>
+
 ## Features
 
 **Bots and audiences**
@@ -54,6 +58,35 @@ don't change, and Orbit never writes to their databases.
 - Organizations with their own bots, broadcasts and members.
 - Roles: owner, admin, sender and viewer. Invite people with a one-time link.
 - An activity log of who did what.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/people.png" alt="People across all bots, with search and filters"></td>
+    <td><img src="docs/screenshots/person.png" alt="One person's record in each bot and the broadcasts they received"></td>
+  </tr>
+  <tr>
+    <td align="center">People across all bots</td>
+    <td align="center">One person, in every bot</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/composer.png" alt="Composing a personalized broadcast with a live preview and reach"></td>
+    <td><img src="docs/screenshots/broadcast.png" alt="A broadcast's live progress, speed and outcomes over time"></td>
+  </tr>
+  <tr>
+    <td align="center">Composing a broadcast</td>
+    <td align="center">Following it live</td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/analytics.png" alt="Audience analytics: growth by bot, overlap and broadcast markers"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">Analytics</td>
+  </tr>
+</table>
+
+The screenshots use made-up bots and people.
 
 ## Your bot's database
 
