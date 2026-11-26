@@ -9,6 +9,7 @@ restarted worker resumes where it stopped.
 import asyncio
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import insert, select, update
@@ -151,7 +152,9 @@ class DeliveryEngine:
                 if audience.mode == "selected":
                     await self._snapshot_selected(s, cid, audience, personal)
                 else:
-                    await self._snapshot_database_audiences(s, cid, campaign.org_id, personal)
+                    await self._snapshot_database_audiences(
+                        s, cid, campaign.org_id, personal, audience.kinds
+                    )
                 record(
                     s,
                     None,
@@ -208,7 +211,11 @@ class DeliveryEngine:
 
     @staticmethod
     async def _snapshot_database_audiences(
-        s: AsyncSession, campaign_id: int, org_id: int, personal: bool = False
+        s: AsyncSession,
+        campaign_id: int,
+        org_id: int,
+        personal: bool = False,
+        kinds: Sequence[str] = (),
     ) -> None:
         """Read each database-source bot's recipients from its own database.
 
@@ -225,10 +232,10 @@ class DeliveryEngine:
             people: list[tuple[int, dict | None]] = []
             try:
                 if personal:
-                    async for chunk in iter_audience_people(s, source):
+                    async for chunk in iter_audience_people(s, source, kinds):
                         people.extend(chunk)
                 else:
-                    async for chunk in iter_audience(s, source):
+                    async for chunk in iter_audience(s, source, kinds):
                         people.extend((cid, None) for cid in chunk)
             except Exception as exc:
                 mark_error(source, exc)

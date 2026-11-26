@@ -247,3 +247,36 @@ async def test_overview_last_24_hours(client):
     assert (line["active_24h"], line["active_7d"]) == (2, 2)  # Ana was 9 days ago
     assert line["lost_24h"] == {"blocked": 1}  # Bob; the group left 3 days ago
     assert line["maps_status"] is True
+
+
+async def test_broadcast_to_some_kinds_of_chat(client, telegram_fake, delivery_engine):
+    bot = await connect_bot(client, 0)
+    await connect_chats(client, bot["id"], "kinds")  # can receive: 1, 5 and supergroup -100
+
+    async def estimate(*kinds):
+        params = [("bot_ids", bot["id"])] + [("kinds", k) for k in kinds]
+        return (await client.get("/campaigns/estimate", params=params)).json()["recipients"]
+
+    assert (await estimate(), await estimate("people"), await estimate("groups")) == (3, 2, 1)
+    assert await estimate("channels") == 0
+
+    async def send(kinds):
+        c = (
+            await client.post(
+                "/campaigns",
+                json={
+                    "name": "x",
+                    "bot_ids": [bot["id"]],
+                    "message": {"text": "hi"},
+                    "audience": {"mode": "all", "kinds": kinds},
+                },
+            )
+        ).json()
+        telegram_fake.sent.clear()
+        await client.post(f"/campaigns/{c['id']}/launch", json={})
+        await drain(delivery_engine)
+        return sorted(m["chat_id"] for m in telegram_fake.sent)
+
+    assert await send(["people"]) == [1, 5]
+    assert await send(["groups"]) == [-100]
+    assert await send([]) == [-100, 1, 5]

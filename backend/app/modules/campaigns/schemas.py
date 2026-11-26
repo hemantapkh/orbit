@@ -17,6 +17,8 @@ class Audience(BaseModel):
 
     mode: Literal["all", "selected"] = "all"
     recipients: list[Recipient] = Field(default_factory=list, max_length=500)
+    # With mode "all": only these kinds of chat. Empty means every kind.
+    kinds: list[Literal["people", "groups", "channels"]] = Field(default_factory=list, max_length=3)
 
 
 class CampaignIn(BaseModel):

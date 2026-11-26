@@ -1,5 +1,6 @@
 import math
 import secrets
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -31,7 +32,7 @@ from app.modules.campaigns.schemas import (
 )
 from app.modules.media.models import MediaAsset
 from app.modules.orgs.deps import Member, Sender, Viewer, get_in_org
-from app.modules.sources.service import counts_by_bot
+from app.modules.sources.service import audience_size, counts_by_bot
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -142,16 +143,28 @@ async def list_campaigns(
 
 
 @router.get("/estimate", response_model=EstimateOut)
-async def estimate(session: SessionDep, m: Viewer, bot_ids: list[int] = Query(default=[])):
-    """Who a broadcast to these bots would reach, and roughly how long sending takes."""
+async def estimate(
+    session: SessionDep,
+    m: Viewer,
+    bot_ids: list[int] = Query(default=[]),
+    kinds: list[Literal["people", "groups", "channels"]] = Query(default=[]),
+):
+    """Who a broadcast to these bots would reach, and roughly how long sending takes.
+    `kinds` narrows it to people / groups / channels, as the broadcast's audience would."""
     allowed = set(
         (
             await session.scalars(select(Bot.id).where(Bot.id.in_(bot_ids), Bot.org_id == m.org_id))
         ).all()
     )
     bot_ids = [b for b in bot_ids if b in allowed]
-    counts = await counts_by_bot(session, bot_ids)
-    per_bot = [EstimateBot(bot_id=b, recipients=counts[b].active) for b in dict.fromkeys(bot_ids)]
+    if kinds and set(kinds) != {"people", "groups", "channels"}:
+        sizes = {b: await audience_size(session, b, kinds) for b in dict.fromkeys(bot_ids)}
+        per_bot = [EstimateBot(bot_id=b, recipients=n or 0) for b, n in sizes.items()]
+    else:
+        counts = await counts_by_bot(session, bot_ids)
+        per_bot = [
+            EstimateBot(bot_id=b, recipients=counts[b].active) for b in dict.fromkeys(bot_ids)
+        ]
     slowest = max((b.recipients for b in per_bot), default=0)
     return EstimateOut(
         recipients=sum(b.recipients for b in per_bot),

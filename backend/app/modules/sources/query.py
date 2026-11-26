@@ -3,7 +3,7 @@
 Table and column names never go into SQL as strings: the table is reflected, and mapped
 or filter columns must exist on the reflected Table before any query is built."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
@@ -79,6 +79,13 @@ SUGGESTIONS: dict[str, list[str]] = {
     "member_count": ["member_count", "members_count", "participants_count"],
     "status_changed_at": ["status_changed_at", "chat_status_at"],
     "unreachable_at": ["unreachable_at"],
+}
+
+# Who a broadcast or list can be narrowed to, and the Telegram chat types each covers.
+CHAT_KINDS: dict[str, tuple[str, ...]] = {
+    "people": ("private",),
+    "groups": ("group", "supergroup"),
+    "channels": ("channel",),
 }
 
 # Telegram ChatMember.status values for a chat the bot can still message.
@@ -566,9 +573,21 @@ def count_query(src: Resolved, spec: SourceSpec):
     return select(func.count(distinct(chat))).where(where_clause(src, spec))
 
 
-def chat_ids_query(src: Resolved, spec: SourceSpec):
+def kinds_clause(src: Resolved, spec: SourceSpec, kinds: Sequence[str]) -> ColumnElement[bool]:
+    """Only these kinds of chat (people / groups / channels); every kind when empty.
+
+    A bot without "Chat type" mapped is taken to hold only people."""
+    if not kinds or set(kinds) >= set(CHAT_KINDS):
+        return true()
+    if not spec.column_map.chat_type:
+        return true() if "people" in kinds else false()
+    kind = func.lower(cast(_value(src, spec.column_map.chat_type), String))
+    return kind.in_([t for k in kinds for t in CHAT_KINDS[k]])
+
+
+def chat_ids_query(src: Resolved, spec: SourceSpec, kinds: Sequence[str] = ()):
     chat = _chat(src, spec)
-    return select(chat).where(where_clause(src, spec)).distinct()
+    return select(chat).where(where_clause(src, spec), kinds_clause(src, spec, kinds)).distinct()
 
 
 def as_chat_id(value) -> int | None:
@@ -582,11 +601,14 @@ def as_chat_id(value) -> int | None:
         return None
 
 
-async def stream_chat_ids(engine: AsyncEngine, spec: SourceSpec) -> AsyncIterator[list[int]]:
+async def stream_chat_ids(
+    engine: AsyncEngine, spec: SourceSpec, kinds: Sequence[str] = ()
+) -> AsyncIterator[list[int]]:
     """Yield integer chat_ids in chunks. Non-numeric values are dropped."""
     async with engine.connect() as conn:
         table = await reflect(conn, spec)
-        result = await conn.stream(chat_ids_query(table, spec).execution_options(yield_per=CHUNK))
+        query = chat_ids_query(table, spec, kinds)
+        result = await conn.stream(query.execution_options(yield_per=CHUNK))
         async for part in result.partitions(CHUNK):
             ids = [cid for (v,) in part if (cid := as_chat_id(v)) is not None]
             if ids:
@@ -596,14 +618,16 @@ async def stream_chat_ids(engine: AsyncEngine, spec: SourceSpec) -> AsyncIterato
 PERSON_FIELDS = ("username", "first_name", "last_name")
 
 
-def people_query(src: Resolved, spec: SourceSpec, chat_ids: list[int] | None = None):
+def people_query(
+    src: Resolved, spec: SourceSpec, chat_ids: list[int] | None = None, kinds: Sequence[str] = ()
+):
     """Chat id plus the mapped name fields, for personalized messages."""
     mapping = spec.column_map.mapped()
     chat = _chat(src, spec)
     cols = [chat.label("chat_id")] + [
         _value(src, mapping[f]).label(f) for f in PERSON_FIELDS if mapping.get(f)
     ]
-    stmt = select(*cols).where(where_clause(src, spec))
+    stmt = select(*cols).where(where_clause(src, spec), kinds_clause(src, spec, kinds))
     if chat_ids is not None:
         stmt = stmt.where(chat.in_(chat_ids))
     return stmt
@@ -617,11 +641,12 @@ def _person(row) -> tuple[int, dict] | None:
 
 
 async def stream_people(
-    engine: AsyncEngine, spec: SourceSpec
+    engine: AsyncEngine, spec: SourceSpec, kinds: Sequence[str] = ()
 ) -> AsyncIterator[list[tuple[int, dict]]]:
     async with engine.connect() as conn:
         src = await reflect(conn, spec)
-        result = await conn.stream(people_query(src, spec).execution_options(yield_per=CHUNK))
+        query = people_query(src, spec, kinds=kinds)
+        result = await conn.stream(query.execution_options(yield_per=CHUNK))
         async for part in result.mappings().partitions(CHUNK):
             people = [p for row in part if (p := _person(row))]
             if people:

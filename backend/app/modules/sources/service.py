@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from collections import Counter, defaultdict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -191,9 +191,11 @@ class _IdCache:
 id_cache = _IdCache()
 
 
-async def collect_chat_ids(engine: AsyncEngine, spec: SourceSpec) -> set[int]:
+async def collect_chat_ids(
+    engine: AsyncEngine, spec: SourceSpec, kinds: Sequence[str] = ()
+) -> set[int]:
     ids: set[int] = set()
-    async for chunk in stream_chat_ids(engine, spec):
+    async for chunk in stream_chat_ids(engine, spec, kinds):
         ids.update(chunk)
     return ids
 
@@ -335,11 +337,14 @@ async def database_people(session: AsyncSession, bot_ids: list[int]) -> set[int]
     return people
 
 
-async def iter_audience(session: AsyncSession, source: BotSource) -> AsyncIterator[list[int]]:
-    """Chunks of chat_ids to message at campaign start: suppressed and duplicates removed."""
+async def iter_audience(
+    session: AsyncSession, source: BotSource, kinds: Sequence[str] = ()
+) -> AsyncIterator[list[int]]:
+    """Chunks of chat_ids to message at campaign start: suppressed and duplicates removed.
+    `kinds` narrows it to people / groups / channels."""
     skip = await suppressed_ids(session, source.bot_id)
     seen: set[int] = set()
-    async for chunk in stream_chat_ids(await engine_for(source), spec_of(source)):
+    async for chunk in stream_chat_ids(await engine_for(source), spec_of(source), kinds):
         fresh = [cid for cid in chunk if cid not in skip and cid not in seen]
         seen.update(fresh)
         if fresh:
@@ -396,12 +401,12 @@ async def unique_active_people(session: AsyncSession, bot_ids: list[int]) -> int
 
 
 async def iter_audience_people(
-    session: AsyncSession, source: BotSource
+    session: AsyncSession, source: BotSource, kinds: Sequence[str] = ()
 ) -> AsyncIterator[list[tuple[int, dict]]]:
     """Like iter_audience, with each person's name fields for personalized messages."""
     skip = await suppressed_ids(session, source.bot_id)
     seen: set[int] = set()
-    async for chunk in stream_people(await engine_for(source), spec_of(source)):
+    async for chunk in stream_people(await engine_for(source), spec_of(source), kinds):
         fresh = [(cid, v) for cid, v in chunk if cid not in skip and cid not in seen]
         seen.update(cid for cid, _ in fresh)
         if fresh:
@@ -416,3 +421,16 @@ async def people_by_chat(
     if source is None or not chat_ids:
         return {}
     return await fetch_people(await engine_for(source), spec_of(source), chat_ids)
+
+
+async def audience_size(session: AsyncSession, bot_id: int, kinds: Sequence[str]) -> int | None:
+    """How many chats of these kinds a broadcast through this bot would reach right now
+    (Orbit's own failures left out). None when the bot's database can't be read."""
+    source = (await database_sources(session, [bot_id])).get(bot_id)
+    if source is None:
+        return 0
+    try:
+        ids = await collect_chat_ids(await engine_for(source), spec_of(source), kinds)
+    except Exception:
+        return None
+    return len(ids - await suppressed_ids(session, bot_id))

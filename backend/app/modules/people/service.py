@@ -25,6 +25,7 @@ from app.modules.people.schemas import (
 from app.modules.sources.connection import safe_error
 from app.modules.sources.models import BotSource, BotSuppression
 from app.modules.sources.query import (
+    CHAT_KINDS,
     Resolved,
     _chat,
     _on_related,
@@ -46,7 +47,6 @@ CACHE_SECONDS = 60
 CHUNK = 1000
 DAY = timedelta(days=1)
 WINDOWS = {"24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY, "90d": 90 * DAY}
-KINDS = {"people": ("private",), "groups": ("group", "supergroup"), "channels": ("channel",)}
 
 # (time, merged rows sorted, skipped, errors) per (org, filters)
 _cache: dict[tuple, tuple[float, list[tuple[int, list[int], datetime | None]], dict, dict]] = {}
@@ -66,7 +66,7 @@ def _conditions(
     if f.kinds:
         if m.chat_type:
             kind = func.lower(cast(_value(src, m.chat_type), String))
-            conds.append(kind.in_([t for k in f.kinds for t in KINDS[k]]))
+            conds.append(kind.in_([t for k in f.kinds for t in CHAT_KINDS[k]]))
         elif f.kinds != ["people"]:  # without a type every chat is taken to be a person
             missing.append("Chat type")
     if f.statuses:
