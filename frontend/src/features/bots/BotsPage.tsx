@@ -83,8 +83,11 @@ export function BotsPage() {
                   </td>
                   <td className="px-5 py-3.5 text-right font-semibold">{fmt(b.subscribers.active)}</td>
                   <td className="px-5 py-3.5 text-right text-ink-soft">{fmt(b.subscribers.blocked)}</td>
-                  <td className="px-5 py-3.5 text-right text-ink-soft">
-                    {fmt(b.subscribers.unreachable)}
+                  <td
+                    className="px-5 py-3.5 text-right text-ink-soft"
+                    title={`Removed from group: ${fmt(b.subscribers.left)} · Deleted account: ${fmt(b.subscribers.deleted)} · Other: ${fmt(b.subscribers.unreachable)}`}
+                  >
+                    {fmt(b.subscribers.unreachable + b.subscribers.left + b.subscribers.deleted)}
                   </td>
                 </tr>
               ))}

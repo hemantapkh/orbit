@@ -45,6 +45,10 @@ export type Admin = { id: number; email: string; name: string; orgs: OrgMembersh
 export type SubscriberCounts = {
   active: number;
   blocked: number;
+  /** the bot was removed from a group or channel */
+  left: number;
+  /** the Telegram account was deleted */
+  deleted: number;
   unreachable: number;
   total: number;
   /** false until the bot's database is connected */
@@ -223,7 +227,14 @@ export type MappedField =
   | "last_name"
   | "language_code"
   | "joined_at"
-  | "is_active";
+  | "is_active"
+  | "chat_type"
+  | "status"
+  | "unreachable_reason"
+  | "last_active_at"
+  | "is_premium"
+  | "title"
+  | "member_count";
 
 export type ColumnMap = { chat_id: string } & Partial<Record<Exclude<MappedField, "chat_id">, string | null>>;
 
@@ -339,6 +350,9 @@ export type AudienceAnalytics = {
   growth: { points: { t: string; bot_id: number; count: number }[]; before_start: Record<string, number>; missing_joined_at: number[] };
   overlap: { by_bot_count: Record<string, number>; pairs: { a: number; b: number; people: number }[]; per_bot: Record<string, number> };
   languages: { items: { code: string; people: number }[]; unknown: number; missing_language: number[] };
+  reach: Record<string, SubscriberCounts>;
+  chat_types: { per_bot: Record<string, Record<string, number>>; group_members: Record<string, number>; missing: number[] };
+  premium: { premium: Record<string, number>; people: Record<string, number>; missing: number[] };
   blocked: { t: string; count: number }[];
   broadcasts: { id: number; name: string; started: string; bucket: string }[];
   errors: Record<string, string>;

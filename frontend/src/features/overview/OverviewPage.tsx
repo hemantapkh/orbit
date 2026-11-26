@@ -67,7 +67,7 @@ function Board({ data }: { data: Overview }) {
                 : b.source_error
                   ? "Can't read the bot's database"
                   : "Online";
-            const gone = b.unreachable;
+            const gone = b.unreachable + b.left + b.deleted;
             return (
               <Link
                 key={b.id}
@@ -88,7 +88,7 @@ function Board({ data }: { data: Overview }) {
                   <div
                     className="flex h-3 overflow-hidden rounded-full bg-canvas"
                     style={{ width: `${Math.max(4, (b.total / widest) * 100)}%` }}
-                    title={`${fmt(b.active)} active · ${fmt(b.blocked)} blocked · ${fmt(gone)} left`}
+                    title={`${fmt(b.active)} active · ${fmt(b.blocked)} blocked · ${fmt(gone)} unreachable`}
                   >
                     <span className="bg-panel" style={{ flexGrow: b.active }} />
                     <span className="bg-status-error/70" style={{ flexGrow: b.blocked }} />

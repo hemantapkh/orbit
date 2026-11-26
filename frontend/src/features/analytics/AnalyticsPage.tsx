@@ -233,6 +233,10 @@ function AudienceTab({ qs, range, picked, bots, selected, long }: { qs: URLSearc
       <GrowthSection d={d} bots={bots} name={name} range={range} />
       <NetGrowthSection d={d} range={range} />
       <div className="grid gap-8 lg:grid-cols-2">
+        <ReachSection d={d} name={name} range={range} />
+        <ChatTypesSection d={d} name={name} range={range} />
+      </div>
+      <div className="grid gap-8 lg:grid-cols-2">
         <OverlapSection d={d} name={name} range={range} />
         <LanguagesSection d={d} name={name} range={range} />
       </div>
@@ -566,6 +570,121 @@ function LanguagesSection({ d, name, range }: { d: AudienceAnalytics; name: (id:
             {d.languages.unknown > 0 && `${fmt(d.languages.unknown)} with no language recorded. `}
             {d.languages.missing_language.length > 0 && `Not included: ${d.languages.missing_language.map((id) => `@${name(id)}`).join(", ")}.`}
           </p>
+        )}
+      </Panel>
+    </section>
+  );
+}
+
+const REACH: { key: "active" | "blocked" | "unreachable" | "left" | "deleted"; label: string; color: string }[] = [
+  { key: "active", label: "Can receive", color: C.delivered },
+  { key: "blocked", label: "Blocked the bot", color: C.blocked },
+  { key: "unreachable", label: "Unreachable", color: C.unreachable },
+  { key: "left", label: "Removed from group", color: C.failed },
+  { key: "deleted", label: "Deleted account", color: C.deleted },
+];
+
+/** Per bot: who can receive a broadcast now, and why the rest can't. */
+function ReachSection({ d, name, range }: { d: AudienceAnalytics; name: (id: number) => string; range: string }) {
+  const ids = d.bots.filter((id) => d.reach[id]);
+  const option = {
+    ...base,
+    legend: { ...base.legend, data: REACH.map((r) => r.label) },
+    tooltip: { ...base.tooltip, trigger: "axis", axisPointer: { type: "shadow" } },
+    grid: { left: 8, right: 16, top: 36, bottom: 8, containLabel: true },
+    xAxis: { ...axis, type: "value", minInterval: 1, axisLabel: { ...axis.axisLabel, formatter: (v: number) => fmt(v) } },
+    yAxis: { ...axis, type: "category", inverse: true, data: ids.map((id) => `@${name(id)}`), axisLabel: { ...axis.axisLabel, color: C.soft, fontSize: 12 } },
+    series: REACH.map((r) => ({
+      name: r.label,
+      type: "bar",
+      stack: "reach",
+      barMaxWidth: 18,
+      itemStyle: { color: r.color, borderColor: C.surface, borderWidth: 1 },
+      data: ids.map((id) => d.reach[id][r.key]),
+    })),
+  };
+  return (
+    <section aria-labelledby="reach-title">
+      <SectionHead title="Who can receive">
+        <CsvButton
+          onClick={() =>
+            downloadCsv(fileName("reach", range), [
+              ["bot", ...REACH.map((r) => r.key)],
+              ...ids.map((id) => [`@${name(id)}`, ...REACH.map((r) => d.reach[id][r.key])]),
+            ])
+          }
+        />
+      </SectionHead>
+      <Panel className="p-5">
+        <Chart option={option} height={Math.max(140, ids.length * 40 + 56)} label="Who each bot can reach" />
+        <p className="mt-3 text-xs text-ink-faint">
+          Right now, from each bot's own records and Orbit's sends. Blocks and removals show up here once the bot's database maps its status.
+        </p>
+      </Panel>
+    </section>
+  );
+}
+
+const TYPE_LABELS: Record<string, string> = { private: "People", group: "Groups", supergroup: "Supergroups", channel: "Channels" };
+
+/** Reachable chats by type, the combined size of the groups, and the Premium share. */
+function ChatTypesSection({ d, name, range }: { d: AudienceAnalytics; name: (id: number) => string; range: string }) {
+  const types: Record<string, number> = {};
+  for (const counts of Object.values(d.chat_types.per_bot))
+    for (const [k, n] of Object.entries(counts)) types[k] = (types[k] ?? 0) + n;
+  const rows = Object.entries(types).sort((a, b) => b[1] - a[1]);
+  const total = rows.reduce((n, [, v]) => n + v, 0);
+  const members = Object.values(d.chat_types.group_members).reduce((n, v) => n + v, 0);
+  const premium = Object.values(d.premium.premium).reduce((n, v) => n + v, 0);
+  const people = Object.values(d.premium.people).reduce((n, v) => n + v, 0);
+  const noTypes = d.chat_types.missing.length === d.bots.length;
+  const noPremium = d.premium.missing.length === d.bots.length;
+  const missing = [...new Set([...d.chat_types.missing, ...d.premium.missing])];
+  return (
+    <section aria-labelledby="types-title">
+      <SectionHead title="Chats and Premium">
+        {rows.length > 0 && (
+          <CsvButton
+            onClick={() =>
+              downloadCsv(fileName("chat-types", range), [
+                ["type", "chats", "share"],
+                ...rows.map(([k, v]) => [k, v, (v / total).toFixed(4)]),
+              ])
+            }
+          />
+        )}
+      </SectionHead>
+      <Panel className="p-5">
+        {noTypes && noPremium ? (
+          <p className="text-sm text-ink-soft">
+            Map <strong className="text-ink">Chat type</strong> and <strong className="text-ink">Premium</strong> in a bot's database mapping to see this.
+          </p>
+        ) : (
+          <>
+            {!noTypes && rows.length > 0 && (
+              <HBars label="Reachable chats by type" rows={rows.map(([k, v]) => ({ label: TYPE_LABELS[k] ?? k, value: v, share: pct(v, total) }))} />
+            )}
+            <dl className="mt-4 grid grid-cols-2 gap-4 text-sm">
+              {!noTypes && (
+                <div>
+                  <dt className="text-ink-faint">Members in those groups</dt>
+                  <dd className="mt-0.5 text-lg font-semibold">{members ? fmt(members) : "—"}</dd>
+                </div>
+              )}
+              {!noPremium && (
+                <div>
+                  <dt className="text-ink-faint">Telegram Premium</dt>
+                  <dd className="mt-0.5 text-lg font-semibold">
+                    {people ? pct(premium, people) : "—"}
+                    <span className="ml-1.5 text-sm font-normal text-ink-faint">{fmt(premium)} of {fmt(people)} people</span>
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </>
+        )}
+        {missing.length > 0 && !(noTypes && noPremium) && (
+          <p className="mt-3 text-xs text-ink-faint">Not included: {missing.map((id) => `@${name(id)}`).join(", ")}.</p>
         )}
       </Panel>
     </section>

@@ -11,6 +11,7 @@ export const C = {
   blocked: "#e8896c",
   unreachable: "#5b6fd6",
   failed: "#b07d00",
+  deleted: "#a05fb0", // deleted accounts; validated with the four above (light)
   // sequential single hue, light → dark (overlap heatmap)
   sequential: ["#eef3f0", "#cfe0d7", "#9fc2b0", "#5f9a80", "#2f6b54", "#17332c"],
 };

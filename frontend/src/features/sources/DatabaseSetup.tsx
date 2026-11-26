@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Plus, Search, Trash2 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   type BotSourceInfo,
@@ -21,14 +21,22 @@ import { Button, cx, Field, fieldClass, Input, StatusDot, Notice } from "../../c
 
 type Step = "connect" | "table" | "map";
 
-const FIELDS: { key: MappedField; label: string; help: string }[] = [
+type FieldGroup = "Profile" | "Activity" | "Reach";
+const FIELDS: { key: MappedField; label: string; help: string; group?: FieldGroup }[] = [
   { key: "chat_id", label: "Telegram user ID", help: "The numeric ID messages are sent to. Required." },
-  { key: "username", label: "Username", help: "The @handle, shown in previews and reports." },
-  { key: "first_name", label: "First name", help: "Shown in previews." },
-  { key: "last_name", label: "Last name", help: "Shown in previews." },
-  { key: "language_code", label: "Language", help: "Two-letter code such as en or ne." },
-  { key: "joined_at", label: "Joined at", help: "When the user first started the bot." },
-  { key: "is_active", label: "Active flag", help: "Rows where this is false or 0 are left out." },
+  { key: "username", label: "Username", help: "The @handle, shown in previews and reports.", group: "Profile" },
+  { key: "first_name", label: "First name", help: "Shown in previews.", group: "Profile" },
+  { key: "last_name", label: "Last name", help: "Shown in previews.", group: "Profile" },
+  { key: "title", label: "Group or channel name", help: "Shown for groups and channels, which have no first name.", group: "Profile" },
+  { key: "language_code", label: "Language", help: "Two-letter code such as en or ne.", group: "Profile" },
+  { key: "is_premium", label: "Premium", help: "True for Telegram Premium users.", group: "Profile" },
+  { key: "joined_at", label: "Joined at", help: "When the user first started the bot.", group: "Activity" },
+  { key: "last_active_at", label: "Last active", help: "When they last used the bot. A failed send is forgotten once they're back.", group: "Activity" },
+  { key: "is_active", label: "Can receive", help: "Rows where this is false or 0 are left out.", group: "Reach" },
+  { key: "status", label: "Bot's status", help: "Telegram's member status: member, kicked (blocked), left... Unreachable rows are left out.", group: "Reach" },
+  { key: "unreachable_reason", label: "Unreachable reason", help: "Set when the chat can't be messaged, e.g. deactivated. Rows with a value are left out.", group: "Reach" },
+  { key: "chat_type", label: "Chat type", help: "private, group, supergroup or channel.", group: "Reach" },
+  { key: "member_count", label: "Member count", help: "How many people are in a group or channel.", group: "Reach" },
 ];
 
 const OPS: { value: FilterOp; label: string; needsValue: boolean }[] = [
@@ -421,8 +429,12 @@ function Mapping({
           aside={table.relations.length ? "Optional. Columns can come from this table or tables linked to it." : "Optional."}
         />
         <div className="divide-y divide-line rounded-xl border border-line">
-          {FIELDS.filter((f) => f.key !== "chat_id").map((f) => (
-            <div key={f.key} className="grid items-center gap-x-6 gap-y-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          {FIELDS.filter((f) => f.key !== "chat_id").map((f, i, all) => (
+            <Fragment key={f.key}>
+            {f.group !== all[i - 1]?.group && (
+              <p className="bg-canvas px-4 py-2 text-sm font-medium text-ink-soft">{f.group}</p>
+            )}
+            <div className="grid items-center gap-x-6 gap-y-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <div>
                 <label htmlFor={`map-${f.key}`} className="font-medium">
                   {f.label}
@@ -437,6 +449,7 @@ function Mapping({
                 </span>
               </div>
             </div>
+            </Fragment>
           ))}
         </div>
       </section>

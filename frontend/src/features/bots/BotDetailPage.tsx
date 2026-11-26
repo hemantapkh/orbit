@@ -102,6 +102,8 @@ export function BotDetailPage() {
               </div>
               <dl className="flex gap-8 pb-0.5 text-sm">
                 <Small label="Blocked the bot" value={s.blocked} />
+                {s.left > 0 && <Small label="Removed from group" value={s.left} />}
+                {s.deleted > 0 && <Small label="Deleted account" value={s.deleted} />}
                 <Small label="Unreachable" value={s.unreachable} />
               </dl>
             </div>
