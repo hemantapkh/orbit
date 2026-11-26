@@ -129,7 +129,13 @@ Built with FastAPI, SQLAlchemy and Alembic, and React, TypeScript and Tailwind C
 
 ## Status
 
-Orbit is in active development and works with Telegram only.
+I built Orbit for my own Telegram bots and use it every day across bots with hundreds of
+thousands of users. It's in active development and works with Telegram only. Issues and
+pull requests are welcome; the roadmap follows what running real bots needs.
+
+## How it's built
+
+Orbit is built with heavy use of AI. I design it and review what goes in.
 
 ## License
 
