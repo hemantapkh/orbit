@@ -369,11 +369,20 @@ function Mapping({
   onBack: () => void;
   onSaved: (s: BotSourceInfo) => void;
 }) {
-  const initial = { ...((existing?.column_map ?? table.suggested) as Partial<ColumnMap>), chat_id: chatColumn };
-  const [map, setMap] = useState<Partial<Record<MappedField, string | null>>>(initial);
-  const [suggested, setSuggested] = useState<Set<MappedField>>(
-    () => new Set(existing ? [] : (Object.keys(table.suggested) as MappedField[])),
+  // Keep what was saved; suggest the fields it leaves empty (e.g. ones Orbit added since),
+  // never reusing a column the saved mapping already uses.
+  const saved = (existing?.column_map ?? {}) as Partial<ColumnMap>;
+  const used = new Set(Object.values(saved).filter(Boolean));
+  const fresh = (Object.keys(table.suggested) as MappedField[]).filter(
+    (k) => !saved[k] && !used.has(table.suggested[k]),
   );
+  const initial = {
+    ...Object.fromEntries(fresh.map((k) => [k, table.suggested[k]])),
+    ...saved,
+    chat_id: chatColumn,
+  };
+  const [map, setMap] = useState<Partial<Record<MappedField, string | null>>>(initial);
+  const [suggested, setSuggested] = useState<Set<MappedField>>(() => new Set(fresh));
   const [filters, setFilters] = useState<SourceFilter[]>(existing?.filters ?? []);
   const groups = useMemo(() => columnGroups(table, tables), [table, tables]);
   const mainOnly = groups.slice(0, 1);
