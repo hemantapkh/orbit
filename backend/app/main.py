@@ -64,6 +64,8 @@ class _HideShareTokens(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(_HideShareTokens())
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# httpx logs every request URL at INFO, and Telegram's URLs carry the bot token.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 @asynccontextmanager

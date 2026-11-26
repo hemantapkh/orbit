@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     run_worker_in_api: bool = True
     send_rate_per_bot: float = 25.0  # Telegram allows ~30 msg/s per bot for broadcasts
     delivery_batch_size: int = 100
-    delivery_concurrency: int = 8
+    delivery_concurrency: int = 25  # sends in flight per batch; the rate limit still applies
     delivery_max_attempts: int = 3
     worker_poll_seconds: float = 2.0
 

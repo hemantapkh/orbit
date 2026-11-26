@@ -21,6 +21,7 @@ class CampaignStatus(StrEnum):
 
 class DeliveryStatus(StrEnum):
     PENDING = "pending"
+    SENDING = "sending"  # claimed by a delivery engine; back to pending if it never reports
     SENT = "sent"
     FAILED = "failed"
     BLOCKED = "blocked"
@@ -91,6 +92,7 @@ class Delivery(Base):
         Index("ix_deliveries_campaign_status", "campaign_id", "status"),
         Index("ix_deliveries_campaign_bot_status", "campaign_id", "bot_id", "status"),
         Index("ix_deliveries_campaign_processed", "campaign_id", "processed_at"),
+        Index("ix_deliveries_status_claimed", "status", "claimed_at"),
     )
 
     id: Mapped[int] = mapped_column(BigId, primary_key=True)
@@ -105,5 +107,7 @@ class Delivery(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # When an engine claimed it for sending (status "sending").
+    claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # When the outcome was final (sent, failed or blocked): drives the progress timeline.
     processed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

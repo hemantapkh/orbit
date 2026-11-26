@@ -37,6 +37,9 @@ from app.modules.sources.service import counts_by_bot, people_by_chat
 
 
 def _stats(counts: dict[str, int]) -> DeliveryStats:
+    counts = dict(counts)
+    # Claimed but not yet reported is still waiting, as far as anyone watching is concerned.
+    counts["pending"] = counts.get("pending", 0) + counts.pop("sending", 0)
     return DeliveryStats(**counts, total=sum(counts.values()))
 
 
@@ -250,7 +253,10 @@ async def progress(session: AsyncSession, c: Campaign, rate_per_bot: float) -> P
         (
             await session.execute(
                 select(Delivery.bot_id, func.count())
-                .where(Delivery.campaign_id == c.id, Delivery.status == DeliveryStatus.PENDING)
+                .where(
+                    Delivery.campaign_id == c.id,
+                    Delivery.status.in_([DeliveryStatus.PENDING, DeliveryStatus.SENDING]),
+                )
                 .group_by(Delivery.bot_id)
             )
         ).all()

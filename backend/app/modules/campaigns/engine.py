@@ -11,8 +11,9 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
@@ -45,6 +46,10 @@ from app.modules.sources.service import (
 )
 
 log = logging.getLogger("orbit.engine")
+
+
+# How long a claimed batch may go unreported before it's offered to another engine.
+CLAIM_TIMEOUT = timedelta(minutes=5)
 
 
 class RateLimiter:
@@ -94,23 +99,69 @@ class DeliveryEngine:
     # ---- loop -------------------------------------------------------------------------
 
     async def run(self, stop: asyncio.Event) -> None:
+        """Send until `stop` is set. Starting campaigns (reading their audience, which can
+        take a while for big bots) runs alongside, so it never holds up sending."""
         log.info("Delivery engine started")
+        starter = asyncio.create_task(self._start_loop(stop))
+        next_release = 0.0
         while not stop.is_set():
             try:
-                busy = await self.tick()
+                if time.monotonic() >= next_release:
+                    await self._release_stale()
+                    next_release = time.monotonic() + 60
+                busy = await self._send_tick()
             except Exception:
                 log.exception("Delivery engine tick failed")
                 busy = False
             if not busy:
-                try:
-                    await asyncio.wait_for(stop.wait(), timeout=self._s.worker_poll_seconds)
-                except TimeoutError:
-                    pass
+                await self._sleep(stop)
+        # A campaign half-started when stopping rolls back and starts again next time.
+        starter.cancel()
+        await asyncio.gather(starter, return_exceptions=True)
         log.info("Delivery engine stopped")
 
+    async def _sleep(self, stop: asyncio.Event) -> None:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=self._s.worker_poll_seconds)
+        except TimeoutError:
+            pass
+
+    async def _start_loop(self, stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            try:
+                await self._start_due_campaigns()
+            except Exception:
+                log.exception("Starting campaigns failed")
+            await self._sleep(stop)
+
+    async def _release_stale(self) -> None:
+        """Messages claimed by an engine that died before reporting go back to pending.
+
+        A claim is fresh for CLAIM_TIMEOUT: well past a batch's sending time, so an engine
+        still finishing a batch (e.g. while a new one starts during a deploy) isn't undercut."""
+        async with self._sm() as s:
+            back = (
+                await s.execute(
+                    update(Delivery)
+                    .where(
+                        Delivery.status == DeliveryStatus.SENDING,
+                        Delivery.claimed_at < utcnow() - CLAIM_TIMEOUT,
+                    )
+                    .values(status=DeliveryStatus.PENDING, claimed_at=None)
+                    .returning(Delivery.id)
+                )
+            ).all()
+            await s.commit()
+        if back:
+            log.warning("Released %d messages claimed by an engine that stopped", len(back))
+
     async def tick(self) -> bool:
-        """One pass. Returns True if anything was sent (so the loop shouldn't sleep)."""
+        """One pass: start due campaigns, then send a batch. Returns True if anything was
+        sent (so the loop shouldn't sleep). Used by tests; `run` does the two separately."""
         await self._start_due_campaigns()
+        return await self._send_tick()
+
+    async def _send_tick(self) -> bool:
         async with self._sm() as s:
             running = (
                 await s.scalars(
@@ -295,6 +346,16 @@ class DeliveryEngine:
             ).all()
 
             if not bots:
+                in_flight = await s.scalar(
+                    select(func.count())
+                    .select_from(Delivery)
+                    .where(
+                        Delivery.campaign_id == campaign_id,
+                        Delivery.status == DeliveryStatus.SENDING,
+                    )
+                )
+                if in_flight:  # another engine is still sending the last batch
+                    return False
                 done = await s.execute(
                     update(Campaign)
                     .where(Campaign.id == campaign_id, Campaign.status == CampaignStatus.RUNNING)
@@ -312,18 +373,6 @@ class DeliveryEngine:
 
             batches: list[tuple[Bot, list[Delivery]]] = []
             for bot in bots:
-                rows = (
-                    await s.scalars(
-                        select(Delivery)
-                        .where(
-                            Delivery.campaign_id == campaign_id,
-                            Delivery.bot_id == bot.id,
-                            Delivery.status == DeliveryStatus.PENDING,
-                        )
-                        .order_by(Delivery.id)
-                        .limit(self._s.delivery_batch_size)
-                    )
-                ).all()
                 if not bot.is_active or not bot.token_valid:
                     await s.execute(
                         update(Delivery)
@@ -335,8 +384,33 @@ class DeliveryEngine:
                         .values(status=DeliveryStatus.SKIPPED, error="bot disabled during campaign")
                     )
                     continue
-                batches.append((bot, list(rows)))
+                # Claim the batch: SKIP LOCKED means two engines (e.g. old and new during a
+                # deploy) never take the same messages.
+                claimable = (
+                    select(Delivery.id)
+                    .where(
+                        Delivery.campaign_id == campaign_id,
+                        Delivery.bot_id == bot.id,
+                        Delivery.status == DeliveryStatus.PENDING,
+                    )
+                    .order_by(Delivery.id)
+                    .limit(self._s.delivery_batch_size)
+                    .with_for_update(skip_locked=True)
+                )
+                rows = (
+                    await s.scalars(
+                        update(Delivery)
+                        .where(Delivery.id.in_(claimable.scalar_subquery()))
+                        .values(status=DeliveryStatus.SENDING, claimed_at=utcnow())
+                        .returning(Delivery)
+                        .execution_options(synchronize_session=False)
+                    )
+                ).all()
+                if rows:
+                    batches.append((bot, list(rows)))
             await s.commit()
+            if not batches:
+                return False
 
         await asyncio.gather(
             *(self._send_batch(bot, rows, content, asset) for bot, rows in batches)
@@ -465,6 +539,7 @@ class DeliveryEngine:
                         "telegram_message_id": o.message_id,
                         "sent_at": now if o.status == DeliveryStatus.SENT else None,
                         "processed_at": None if o.status == DeliveryStatus.PENDING else now,
+                        "claimed_at": None,
                     }
                     for o in outcomes
                 ],

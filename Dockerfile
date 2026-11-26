@@ -45,4 +45,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
 ENTRYPOINT ["docker-entrypoint.sh"]
 # One worker: the delivery engine runs in this process. To scale the API, set
 # ORBIT_RUN_WORKER_IN_API=false and run a separate container with `python -m app.worker`.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Stop waiting for open connections after 3s on shutdown, so the delivery engine gets to
+# finish its batch well inside Docker's 10s before the container is killed.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*", "--timeout-graceful-shutdown", "3"]

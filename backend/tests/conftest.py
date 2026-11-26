@@ -11,7 +11,10 @@ import pytest
 
 _tmp = Path(tempfile.mkdtemp(prefix="orbit-test-"))
 os.environ.update(
-    ORBIT_DATABASE_URL=f"sqlite+aiosqlite:///{_tmp}/test.db",
+    # ORBIT_TEST_DATABASE_URL runs the suite against another database, e.g. Postgres.
+    ORBIT_DATABASE_URL=os.environ.get(
+        "ORBIT_TEST_DATABASE_URL", f"sqlite+aiosqlite:///{_tmp}/test.db"
+    ),
     ORBIT_MEDIA_DIR=str(_tmp / "media"),
     ORBIT_RUN_WORKER_IN_API="false",
     ORBIT_SEND_RATE_PER_BOT="10000",
