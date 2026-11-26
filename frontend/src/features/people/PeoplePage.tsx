@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ChevronLeft, ChevronRight, Search, SlidersHorizontal, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, Search, SlidersHorizontal, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { BotAvatar } from "../../components/BotAvatar";
@@ -42,6 +42,8 @@ const FILTERS: { key: string; label: string; options: [string, string][] }[] = [
   { key: "multi", label: "Bots used", options: [["", "Any number"], ["true", "2 or more bots"]] },
 ];
 const PANEL_KEYS = [...FILTERS.map((f) => f.key), "language"];
+/** Columns that start newest/most first; the rest start A to Z (type: people first). */
+const DESC_FIRST = new Set(["last_active", "joined", "bots"]);
 
 const CATEGORY: Record<PersonCategory, { label: string; dot: string }> = {
   can_receive: { label: "Can receive", dot: "bg-status-ok" },
@@ -65,7 +67,8 @@ export function PeoplePage() {
     setParams(
       (p) => {
         const next = new URLSearchParams(p);
-        if (value) next.set(key, value);
+        if (key.startsWith("bot:")) next.delete("bot", key.slice(4));  // one of several bots
+        else if (value) next.set(key, value);
         else next.delete(key);
         if (key !== "page") next.delete("page");
         return next;
@@ -93,8 +96,28 @@ export function PeoplePage() {
     placeholderData: keepPreviousData,
   });
 
-  const filtered = [...params.keys()].some((k) => k !== "page" && k !== "sort");
-  const sort = params.get("sort") === "joined" ? "joined" : "last_active";
+  const filtered = [...params.keys()].some((k) => !["page", "sort", "order"].includes(k));
+  const sort = params.get("sort") ?? "last_active";
+  const order = params.get("order") ?? (DESC_FIRST.has(sort) ? "desc" : "asc");
+  /** Click a column: sort by it in its natural order; click it again to reverse. */
+  const sortBy = (col: string) =>
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p);
+        const natural = DESC_FIRST.has(col) ? "desc" : "asc";
+        const flip = col === sort ? (order === natural ? (natural === "desc" ? "asc" : "desc") : natural) : natural;
+        if (col === "last_active") next.delete("sort");
+        else next.set("sort", col);
+        if (flip === natural) next.delete("order");
+        else next.set("order", flip);
+        next.delete("page");
+        return next;
+      },
+      { replace: true },
+    );
+  const head = (label: string, col: string, className: string) => (
+    <SortHeader label={label} active={sort === col} order={order} onClick={() => sortBy(col)} className={className} />
+  );
   const d = list.data;
   const pages = d ? Math.max(1, Math.ceil(d.total / SIZE)) : 1;
   const name = (id: number | string) => `@${botById.get(Number(id))?.username ?? `bot ${id}`}`;
@@ -109,12 +132,22 @@ export function PeoplePage() {
           <Search size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-faint" />
           <Input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Search name, @username or Telegram ID" className="pl-9" />
         </label>
-        <select aria-label="Bot" value={params.get("bot") ?? ""} onChange={(e) => set("bot", e.target.value)} className={cx(fieldClass, "h-10 w-auto max-w-[220px]")}>
-          <option value="">All bots</option>
-          {(bots.data ?? []).map((b) => (
-            <option key={b.id} value={b.id}>@{b.username}</option>
-          ))}
-        </select>
+        <BotPicker
+          bots={bots.data ?? []}
+          picked={params.getAll("bot").map(Number)}
+          onChange={(ids) =>
+            setParams(
+              (p) => {
+                const next = new URLSearchParams(p);
+                next.delete("bot");
+                for (const id of ids) next.append("bot", String(id));
+                next.delete("page");
+                return next;
+              },
+              { replace: true },
+            )
+          }
+        />
         <FilterPanel params={params} set={set} />
       </div>
 
@@ -123,7 +156,9 @@ export function PeoplePage() {
         set={set}
         onClear={() => {
           setTerm("");
-          setParams(new URLSearchParams(params.get("sort") ? { sort: params.get("sort")! } : {}), { replace: true });
+          const keep = new URLSearchParams();
+          for (const k of ["sort", "order"]) if (params.get(k)) keep.set(k, params.get(k)!);
+          setParams(keep, { replace: true });
         }}
         botName={(id) => name(id)}
       />
@@ -151,13 +186,6 @@ export function PeoplePage() {
               <span className="text-lg font-semibold text-ink">{fmt(d.total)}</span> {d.total === 1 ? "match" : "matches"}
               {list.isFetching && <span className="ml-2 text-ink-faint">updating…</span>}
             </p>
-            <label className="flex items-center gap-2 text-sm text-ink-soft">
-              Sort by
-              <select value={sort} onChange={(e) => set("sort", e.target.value === "last_active" ? "" : e.target.value)} className={cx(fieldClass, "h-9 w-auto text-sm")}>
-                <option value="last_active">Last active, newest first</option>
-                <option value="joined">Joined, newest first</option>
-              </select>
-            </label>
           </div>
           {d.items.length === 0 ? (
             <Panel className="px-6 py-12 text-center text-ink-soft">
@@ -168,12 +196,12 @@ export function PeoplePage() {
               <table className="w-full min-w-[820px] text-left text-sm">
                 <thead className="border-b border-line text-ink-soft">
                   <tr>
-                    <th className="px-5 py-3 font-medium">Name</th>
-                    <th className="px-4 py-3 font-medium">Bots</th>
-                    <th className="px-4 py-3 font-medium">Type</th>
-                    <th className="px-4 py-3 font-medium">Language</th>
-                    <SortHeader label="Joined" value="joined" sort={sort} onSort={(v) => set("sort", v)} className="px-4" />
-                    <SortHeader label="Last active" value="last_active" sort={sort} onSort={(v) => set("sort", v === "last_active" ? "" : v)} className="px-5" />
+                    {head("Name", "name", "px-5")}
+                    {head("Bots", "bots", "px-4")}
+                    {head("Type", "kind", "px-4")}
+                    {head("Language", "language", "px-4")}
+                    {head("Joined", "joined", "px-4")}
+                    {head("Last active", "last_active", "px-5")}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -383,7 +411,7 @@ function FilterPanel({ params, set }: { params: URLSearchParams; set: (k: string
 function ActiveFilters({ params, set, onClear, botName }: { params: URLSearchParams; set: (k: string, v: string) => void; onClear: () => void; botName: (id: string) => string }) {
   const chips: { key: string; text: string }[] = [];
   if (params.get("q")) chips.push({ key: "q", text: `“${params.get("q")}”` });
-  if (params.get("bot")) chips.push({ key: "bot", text: botName(params.get("bot")!) });
+  for (const id of params.getAll("bot")) chips.push({ key: `bot:${id}`, text: botName(id) });
   for (const f of FILTERS) {
     const v = params.get(f.key);
     const label = f.options.find(([o]) => o === v)?.[1];
@@ -412,14 +440,66 @@ function ActiveFilters({ params, set, onClear, botName }: { params: URLSearchPar
   );
 }
 
-function SortHeader({ label, value, sort, onSort, className }: { label: string; value: string; sort: string; onSort: (v: string) => void; className?: string }) {
-  const on = sort === value;
+function SortHeader({ label, active, order, onClick, className }: { label: string; active: boolean; order: string; onClick: () => void; className?: string }) {
+  const Arrow = order === "asc" ? ArrowUp : ArrowDown;
   return (
-    <th className={cx("py-3 font-medium", className)} aria-sort={on ? "descending" : "none"}>
-      <button type="button" onClick={() => onSort(value)} className={cx("inline-flex items-center gap-1 hover:text-ink", on && "text-ink")}>
+    <th className={cx("py-3 font-medium", className)} aria-sort={active ? (order === "asc" ? "ascending" : "descending") : "none"}>
+      <button type="button" onClick={onClick} className={cx("group inline-flex items-center gap-1 hover:text-ink", active && "text-ink")} title={`Sort by ${label.toLowerCase()}`}>
         {label}
-        <ArrowDown size={13} className={cx(!on && "opacity-0")} />
+        {active ? <Arrow size={13} /> : <ArrowDown size={13} className="opacity-0 group-hover:opacity-40" />}
       </button>
     </th>
+  );
+}
+
+/** Choose any number of bots; none chosen means all of them. */
+function BotPicker({ bots, picked, onChange }: { bots: Bot[]; picked: number[]; onChange: (ids: number[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+  const chosen = bots.filter((b) => picked.includes(b.id));
+  const label = chosen.length === 0 ? "All bots" : chosen.length === 1 ? `@${chosen[0].username}` : `${chosen.length} bots`;
+  const toggle = (id: number) => onChange(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
+  return (
+    <div ref={ref} className="relative">
+      <Button onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="listbox" className={cx("max-w-[220px]", chosen.length > 0 && "border-accent")}>
+        <span className="truncate">{label}</span>
+        <ChevronDown size={15} className="shrink-0 text-ink-faint" />
+      </Button>
+      {open && (
+        <div role="listbox" aria-multiselectable className="absolute left-0 z-20 mt-2 w-64 rounded-xl border border-line bg-surface p-1.5 shadow-[0_18px_40px_-18px_rgba(23,33,30,0.35)]">
+          <button type="button" onClick={() => onChange([])} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-canvas">
+            <input type="checkbox" readOnly checked={picked.length === 0} tabIndex={-1} />
+            All bots
+          </button>
+          <div className="my-1 border-t border-line" />
+          {bots.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              role="option"
+              aria-selected={picked.includes(b.id)}
+              onClick={() => toggle(b.id)}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-canvas"
+            >
+              <input type="checkbox" readOnly checked={picked.includes(b.id)} tabIndex={-1} />
+              <BotAvatar bot={b} size={22} />
+              <span className="min-w-0 truncate">@{b.username}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

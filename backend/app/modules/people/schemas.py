@@ -7,7 +7,8 @@ ChatKind = Literal["people", "groups", "channels"]
 Category = Literal["can_receive", "blocked", "left", "deleted", "unreachable"]
 Activity = Literal["24h", "7d", "30d", "90d", "dormant_30d", "dormant_90d", "never"]
 Joined = Literal["24h", "7d", "30d", "90d"]
-Sort = Literal["last_active", "joined"]
+Sort = Literal["last_active", "joined", "name", "kind", "language", "bots"]
+Order = Literal["asc", "desc"]
 
 
 class PeopleQuery(BaseModel):
@@ -23,6 +24,9 @@ class PeopleQuery(BaseModel):
     premium: bool | None = None
     multi: bool = False  # on two or more of the bots
     sort: Sort = "last_active"
+    order: Order | None = (
+        None  # None: the column's natural order (dates and bots newest/most first)
+    )
 
 
 class BotRecord(BaseModel):

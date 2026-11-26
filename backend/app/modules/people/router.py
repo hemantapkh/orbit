@@ -10,6 +10,7 @@ from app.modules.people.schemas import (
     Category,
     ChatKind,
     Joined,
+    Order,
     PeoplePage,
     PeopleQuery,
     PersonDetail,
@@ -33,6 +34,7 @@ async def list_people(
     premium: bool | None = None,
     multi: bool = False,
     sort: Sort = "last_active",
+    order: Order | None = None,
     page: int = Query(default=1, ge=1),
     size: int = Query(default=50, ge=10, le=200),
 ):
@@ -47,6 +49,7 @@ async def list_people(
         premium=premium,
         multi=multi,
         sort=sort,
+        order=order,
     )
     return await service.people_page(session, m.org_id, f, page, size)
 

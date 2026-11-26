@@ -9,7 +9,7 @@ import asyncio
 import time
 from datetime import datetime, timedelta
 
-from sqlalchemy import String, cast, false, func, or_, select
+from sqlalchemy import String, cast, false, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import utcnow
@@ -117,8 +117,27 @@ async def _orbit_failures(session: AsyncSession, bot_id: int) -> dict[str, list[
     return out
 
 
+# Types in a fixed order rather than alphabetical: people, then groups, then channels.
+KIND_ORDER = {"private": 0, "group": 1, "supergroup": 2, "channel": 3}
+DESCENDING_FIRST = {"last_active", "joined", "bots"}
+
+
+def _sort_value(src: Resolved, spec, sort: str):
+    """SQL for the value a text/date column sorts by, or None (bots, last_active: no extra)."""
+    m = spec.column_map
+    if sort == "joined" and m.joined_at:
+        return _value(src, m.joined_at)
+    text = {"kind": m.chat_type, "language": m.language_code}.get(sort)
+    if sort == "name":
+        parts = [_value(src, ref) for ref in (m.first_name, m.title, m.username) if ref]
+        text_expr = func.coalesce(*parts) if len(parts) > 1 else (parts[0] if parts else None)
+        return func.lower(cast(text_expr, String)) if text_expr is not None else None
+    return func.lower(cast(_value(src, text), String)) if text else None
+
+
 async def _matches(source: BotSource, f: PeopleQuery, orbit: dict[str, list[int]], now):
-    """(chat_id, sort key) for this bot's matching chats, or the fields it's missing."""
+    """(chat_id, last active, sort value) for this bot's matching chats, or the fields it's
+    missing."""
     spec = spec_of(source)
     m = spec.column_map
     async with (await engine_for(source)).connect() as conn:
@@ -126,16 +145,39 @@ async def _matches(source: BotSource, f: PeopleQuery, orbit: dict[str, list[int]
         conds, missing = _conditions(src, spec, f, orbit, conn.dialect.name, now)
         if missing:
             return None, missing
-        sort_ref = m.last_active_at if f.sort == "last_active" else m.joined_at
-        key = _value(src, sort_ref) if sort_ref else None
-        cols = [_chat(src, spec)] + ([key] if key is not None else [])
-        out: list[tuple[int, datetime | None]] = []
+        cols = [_chat(src, spec)]
+        cols.append(_value(src, m.last_active_at) if m.last_active_at else literal(None))
+        value = _sort_value(src, spec, f.sort)
+        cols.append(value if value is not None else literal(None))
+        out: list[tuple[int, datetime | None, object]] = []
         result = await conn.stream(select(*cols).where(*conds).execution_options(yield_per=5000))
         async for part in result.partitions(5000):
-            for row in part:
-                if (cid := as_chat_id(row[0])) is not None:
-                    out.append((cid, _as_utc(row[1]) if key is not None else None))
+            for cid_raw, seen, v in part:
+                if (cid := as_chat_id(cid_raw)) is not None:
+                    out.append((cid, _as_utc(seen), _as_utc(v) if f.sort == "joined" else v))
         return out, []
+
+
+def _ordered(rows: list[list], f: PeopleQuery) -> list[tuple[int, list[int], datetime | None]]:
+    """Sort merged rows [chat_id, bots, last active, value]. Empty values go last whichever
+    way; ties keep most recently active first."""
+    rows.sort(key=lambda r: (r[2] is None, -(r[2].timestamp() if r[2] else 0), r[0]))
+
+    def primary(r):
+        match f.sort:
+            case "last_active":
+                return r[2]
+            case "bots":
+                return len(r[1])
+            case "kind":
+                return KIND_ORDER.get(r[3], len(KIND_ORDER)) if r[3] else None
+            case _:
+                return r[3] or None
+
+    order = f.order or ("desc" if f.sort in DESCENDING_FIRST else "asc")
+    present = [r for r in rows if primary(r) is not None]
+    present.sort(key=primary, reverse=order == "desc")  # stable: ties keep the order above
+    return [(r[0], r[1], r[2]) for r in present + [r for r in rows if primary(r) is None]]
 
 
 async def _merged(session: AsyncSession, org_id: int, f: PeopleQuery):
@@ -155,7 +197,7 @@ async def _merged(session: AsyncSession, org_id: int, f: PeopleQuery):
     results = await asyncio.gather(
         *(_matches(s, f, orbit[b], now) for b, s in sources.items()), return_exceptions=True
     )
-    people: dict[int, tuple[list[int], datetime | None]] = {}
+    people: dict[int, list] = {}
     skipped: dict[int, list[str]] = {}
     errors: dict[int, str] = {}
     for bot_id, r in zip(sources, results, strict=True):
@@ -169,15 +211,24 @@ async def _merged(session: AsyncSession, org_id: int, f: PeopleQuery):
         # Orbit's own failures override the bot's "can receive".
         if f.status == "can_receive":
             gone = {c for ids in orbit[bot_id].values() for c in ids}
-            rows = [(c, k) for c, k in rows if c not in gone]
-        for cid, k in rows:
-            bots, best = people.get(cid, ([], None))
-            bots.append(bot_id)
-            people[cid] = (bots, k if best is None or (k is not None and k > best) else best)
+            rows = [r for r in rows if r[0] not in gone]
+        for cid, seen, value in rows:
+            entry = people.setdefault(cid, [cid, [], None, None])
+            entry[1].append(bot_id)
+            if seen is not None and (entry[2] is None or seen > entry[2]):
+                entry[2] = seen  # latest activity across bots
+            if (
+                value is not None
+                and entry[3] is None
+                or (
+                    isinstance(value, datetime)
+                    and isinstance(entry[3], datetime)
+                    and value < entry[3]
+                )
+            ):
+                entry[3] = value  # first known name/type/language; earliest join
 
-    merged = [(cid, bots, k) for cid, (bots, k) in people.items() if not f.multi or len(bots) > 1]
-    # Most recent first; chats without a date last, then by id for a stable order.
-    merged.sort(key=lambda r: (r[2] is None, -(r[2].timestamp() if r[2] else 0), r[0]))
+    merged = _ordered([r for r in people.values() if not f.multi or len(r[1]) > 1], f)
     if len(_cache) > 64:
         _cache.clear()
     _cache[key] = (time.monotonic(), merged, skipped, errors)

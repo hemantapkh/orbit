@@ -92,3 +92,32 @@ async def test_orbit_failures_and_person_view(client, telegram_fake, delivery_en
         ("Hello", a, "sent")
     ]
     assert (await client.get("/people/999")).json() == {"person": None, "received": []}
+
+
+async def test_sorting_by_column(client):
+    a, b = await two_bots(client)
+
+    async def ids(**params):
+        return [p["chat_id"] for p in (await people(client, **params))["items"]]
+
+    # Type: people, then groups, then supergroups; most recently active first within each;
+    # 77 has no type (bot b doesn't map it) so it goes last.
+    assert await ids(sort="kind") == [5, 1, 2, 3, 4, -200, -100, 77]
+    assert await ids(sort="kind", order="desc") == [-100, -200, 5, 1, 2, 3, 4, 77]
+    # Name A to Z, chats without a name last; reversed keeps them last too.
+    assert await ids(sort="name") == [1, 2, 4, 5, -100, -200, 77, 3]
+    assert (await ids(sort="name", order="desc"))[-1] == 3
+    # Bots: people on both bots first.
+    assert (await ids(sort="bots"))[:2] == [5, 1]
+    # Joined: newest first by default, oldest first when asked.
+    assert (await ids(sort="joined"))[0] in (5, -100)
+    assert (await ids(sort="joined", order="asc"))[-1] == 77  # bot b has no join date
+
+
+async def test_several_bots_at_once(client):
+    a, b = await two_bots(client)
+    c = await connect_bot(client, 2)
+    await attach_users(client, c["id"], [(9, "nine", "Nine")])
+    both = await people(client, bot=[a, b])
+    assert both["total"] == 8 and 9 not in {p["chat_id"] for p in both["items"]}
+    assert (await people(client, bot=[b, c["id"]]))["total"] == 4  # 1, 5, 77 and 9
