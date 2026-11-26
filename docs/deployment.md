@@ -62,9 +62,11 @@ Caddy: `orbit.example.com { reverse_proxy orbit:8000 }` plus `request_body { max
 
 ## Production checklist
 
-- **One sender at a time.** Run a single replica (or a single `app.worker`). Two senders on
-  the same broadcast can deliver a batch twice. Prefer "stop-first" updates.
-- **Graceful shutdown.** Give the container ~30 s to stop so the batch in flight is recorded.
+- **Senders claim their batches,** so two containers overlapping during a deploy never send
+  the same message twice. A batch claimed by a container that was killed is sent again
+  after 5 minutes.
+- **Graceful shutdown.** Give the container at least 10 s to stop so the batch in flight is
+  recorded.
 - **Keep port 8000 private.** Publish it on `127.0.0.1` and let the proxy face the internet.
 - **Back up** Orbit's database and the `/data` volume (uploaded media).
 
