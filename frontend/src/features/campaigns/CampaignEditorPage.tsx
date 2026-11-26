@@ -4,6 +4,7 @@ import { type ReactNode, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useOrg } from "../../app/auth";
 import {
+  type ChatKind,
   api,
   type Audience,
   type Bot,
@@ -87,7 +88,14 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
   // Picked people only count while their bot is still selected.
   const recipients = audience.recipients.filter((r) => botIds.includes(r.bot_id));
   const picking = audience.mode === "selected";
-  const reachCount = picking ? recipients.length : selected.reduce((n, b) => n + b.subscribers.active, 0);
+  const kinds = audience.kinds ?? [];
+  const narrowed = !picking && kinds.length > 0;
+  const narrowedEstimate = useQuery({ ...estimateQuery(botIds, kinds), enabled: narrowed && botIds.length > 0 });
+  const reachCount = picking
+    ? recipients.length
+    : narrowed
+      ? (narrowedEstimate.data?.recipients ?? 0)
+      : selected.reduce((n, b) => n + b.subscribers.active, 0);
   const limit = message.media_id != null ? CAPTION_LIMIT : TEXT_LIMIT;
   const tooLong = message.text.length > limit;
   const isEmpty = !message.text.trim() && message.media_id == null;
@@ -99,7 +107,7 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
         name: name.trim() || "Untitled broadcast",
         bot_ids: botIds,
         message,
-        audience: { mode: audience.mode, recipients: picking ? recipients : [] },
+        audience: { mode: audience.mode, recipients: picking ? recipients : [], kinds: picking ? [] : kinds },
       };
       return id
         ? api<CampaignDetail>(`/campaigns/${id}`, { method: "PATCH", json: body })
@@ -223,6 +231,9 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
                       </button>
                     ))}
                   </div>
+                  {!picking && (
+                    <KindPicker kinds={kinds} onChange={(k) => setAudience((a) => ({ ...a, kinds: k }))} />
+                  )}
                   {picking && (
                     <PeoplePicker
                       bots={selected}
@@ -274,7 +285,7 @@ function Editor({ initial, bots }: { initial?: CampaignDetail; bots: Bot[] }) {
         </div>
 
         <aside className="space-y-6 lg:sticky lg:top-8 lg:self-start">
-          <ReachCard bots={selected} picked={picking ? recipients.length : null} />
+          <ReachCard bots={selected} picked={picking ? recipients.length : null} kinds={picking ? [] : kinds} />
           <section aria-label="Preview">
             <h2 className="mb-3 font-semibold">Preview</h2>
             <MessagePreview message={{ ...message, text: withSamples(message.text) }} media={media.data ?? null} />
@@ -525,14 +536,57 @@ function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange
 }
 
 /** Who this broadcast reaches, per bot, and roughly how long sending takes. */
-function ReachCard({ bots, picked }: { bots: Bot[]; picked: number | null }) {
+function estimateQuery(ids: number[], kinds: ChatKind[]) {
+  const qs = [...ids.map((i) => `bot_ids=${i}`), ...kinds.map((k) => `kinds=${k}`)].join("&");
+  return {
+    queryKey: ["estimate", ids, kinds],
+    queryFn: () => api<Estimate>(`/campaigns/estimate?${qs}`),
+    placeholderData: (prev: Estimate | undefined) => prev,
+  };
+}
+
+const KINDS: [ChatKind, string][] = [
+  ["people", "People"],
+  ["groups", "Groups"],
+  ["channels", "Channels"],
+];
+
+/** Which kinds of chat get it. All three on (the default) is everyone; at least one stays on. */
+function KindPicker({ kinds, onChange }: { kinds: ChatKind[]; onChange: (k: ChatKind[]) => void }) {
+  const on = (k: ChatKind) => kinds.length === 0 || kinds.includes(k);
+  const toggle = (k: ChatKind) => {
+    const next = KINDS.map(([x]) => x).filter((x) => (x === k ? !on(x) : on(x)));
+    if (next.length === 0) return;
+    onChange(next.length === KINDS.length ? [] : next);
+  };
+  return (
+    <fieldset className="flex flex-wrap items-center gap-2 text-sm">
+      <legend className="sr-only">Kinds of chat</legend>
+      <span className="mr-1 text-ink-soft">Send to</span>
+      {KINDS.map(([k, label]) => (
+        <button
+          key={k}
+          type="button"
+          aria-pressed={on(k)}
+          onClick={() => toggle(k)}
+          className={cx(
+            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 transition-colors",
+            on(k) ? "border-accent bg-accent-wash text-accent-deep" : "border-line text-ink-soft hover:border-line-strong",
+          )}
+        >
+          <span className={cx("grid size-3.5 place-items-center rounded-[4px] border", on(k) ? "border-accent-deep bg-accent-deep text-surface" : "border-line-strong")} aria-hidden>
+            {on(k) && <Check size={10} strokeWidth={3} />}
+          </span>
+          {label}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
+function ReachCard({ bots, picked, kinds }: { bots: Bot[]; picked: number | null; kinds: ChatKind[] }) {
   const ids = bots.map((b) => b.id);
-  const est = useQuery({
-    queryKey: ["estimate", ids],
-    queryFn: () => api<Estimate>(`/campaigns/estimate?${ids.map((i) => `bot_ids=${i}`).join("&")}`),
-    enabled: ids.length > 0 && picked == null,
-    placeholderData: (prev) => prev,
-  });
+  const est = useQuery({ ...estimateQuery(ids, kinds), enabled: ids.length > 0 && picked == null });
   const total = picked ?? est.data?.recipients ?? 0;
   const perBot = new Map(est.data?.bots.map((b) => [b.bot_id, b.recipients]));
 

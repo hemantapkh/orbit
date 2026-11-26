@@ -108,7 +108,9 @@ export type DeliveryStats = {
 };
 
 export type Recipient = { bot_id: number; chat_id: number; label: string };
-export type Audience = { mode: "all" | "selected"; recipients: Recipient[] };
+export type ChatKind = "people" | "groups" | "channels";
+/** kinds: with mode "all", only these kinds of chat; empty means every kind. */
+export type Audience = { mode: "all" | "selected"; recipients: Recipient[]; kinds?: ChatKind[] };
 
 export type Campaign = {
   id: number;

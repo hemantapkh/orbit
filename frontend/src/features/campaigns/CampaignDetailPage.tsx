@@ -116,7 +116,9 @@ export function CampaignDetailPage() {
             <span className="text-sm">
               {c.audience.mode === "selected"
                 ? `To ${fmt(c.audience.recipients.length)} selected ${c.audience.recipients.length === 1 ? "person" : "people"}`
-                : "To everyone on the selected bots"}
+                : c.audience.kinds?.length
+                  ? `To ${c.audience.kinds.join(" and ")} on the selected bots`
+                  : "To everyone on the selected bots"}
             </span>
             {c.sends.length > 1 && (
               <span className="text-sm">
