@@ -3,7 +3,7 @@ import { ArrowLeft, Pencil, Share2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useOrg } from "../../app/auth";
-import { api, type CampaignDetail, type Delivery, type Media, type Page, type Progress, type RelatedSend } from "../../lib/api";
+import { api, type Bot, type CampaignDetail, type Delivery, type Media, type Page, type Progress, type RelatedCampaign } from "../../lib/api";
 import { fmt, when } from "../../lib/format";
 import { Button, buttonClass, CampaignStatusTag, cx, Dialog, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
 import { ActivityList } from "../activity/ActivityList";
@@ -120,9 +120,12 @@ export function CampaignDetailPage() {
                   ? `To ${c.audience.kinds.join(" and ")} on the selected bots`
                   : "To everyone on the selected bots"}
             </span>
-            {c.sends.length > 1 && (
+            {c.copied_from && (
               <span className="text-sm">
-                Send {c.sends.findIndex((x) => x.id === c.id) + 1} of {c.sends.length} of this message
+                Copied from{" "}
+                <Link to={`/broadcasts/${c.copied_from.id}`} className="font-medium text-ink underline-offset-4 hover:underline">
+                  {c.copied_from.name}
+                </Link>
               </span>
             )}
           </span>
@@ -173,7 +176,7 @@ export function CampaignDetailPage() {
 
           {s.failed + s.blocked > 0 && <Problems campaignId={c.id} bots={c.bots} />}
 
-          {c.sends.length > 1 && <Sends current={c.id} sends={c.sends} bots={c.bots} />}
+          {(c.copied_from || c.copies.length > 0) && <Related detail={c} />}
 
           <ActivityList entityType="campaign" entityId={c.id} />
         </div>
@@ -262,26 +265,31 @@ function Row({ k, v }: { k: string; v: string }) {
   );
 }
 
-function Sends({ current, sends, bots }: { current: number; sends: RelatedSend[]; bots: CampaignDetail["bots"] }) {
-  const name = (id: number) => bots.find((b) => b.bot_id === id)?.username ?? `bot ${id}`;
+/** The broadcast this was copied from and the copies made of it, each with its own progress. */
+function Related({ detail }: { detail: CampaignDetail }) {
+  const { data: allBots } = useQuery({ queryKey: ["bots"], queryFn: () => api<Bot[]>("/bots") });
+  const name = (id: number) => allBots?.find((b) => b.id === id)?.username ?? `bot ${id}`;
+  const rows: [string, RelatedCampaign][] = [
+    ...(detail.copied_from ? [["Copied from", detail.copied_from] as [string, RelatedCampaign]] : []),
+    ...detail.copies.map((x) => ["Copy", x] as [string, RelatedCampaign]),
+  ];
   return (
     <section>
-      <h2 className="mb-3 text-lg font-semibold">Every send of this message</h2>
+      <h2 className="mb-3 text-lg font-semibold">Related broadcasts</h2>
       <Panel className="divide-y divide-line">
-        {sends.map((x, i) => (
+        {rows.map(([role, x]) => (
           <Link
             key={x.id}
             to={x.status === "draft" ? `/broadcasts/${x.id}/edit` : `/broadcasts/${x.id}`}
-            aria-current={x.id === current ? "page" : undefined}
-            className={cx(
-              "grid gap-x-6 gap-y-1 px-5 py-3.5 text-sm hover:bg-canvas/70 sm:grid-cols-[60px_minmax(0,1fr)_120px_150px]",
-              x.id === current && "bg-accent-wash/40",
-            )}
+            className="grid gap-x-6 gap-y-1 px-5 py-3.5 text-sm hover:bg-canvas/70 sm:grid-cols-[100px_minmax(0,1fr)_120px_170px]"
           >
-            <span className="font-medium">#{i + 1}</span>
-            <span className="min-w-0 truncate text-ink-soft">
-              {x.audience_mode === "selected" ? "Selected people" : "Everyone"} on{" "}
-              {x.bot_ids.map((id) => `@${name(id)}`).join(", ") || "no bots"}
+            <span className="text-ink-faint">{role}</span>
+            <span className="min-w-0">
+              <span className="block truncate font-medium">{x.name}</span>
+              <span className="block truncate text-ink-faint">
+                {x.audience_mode === "selected" ? "Selected people" : "Everyone"} on{" "}
+                {x.bot_ids.map((id) => `@${name(id)}`).join(", ") || "no bots"}
+              </span>
             </span>
             <CampaignStatusTag status={x.status} />
             <span className="text-right text-ink-soft">

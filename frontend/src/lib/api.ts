@@ -119,9 +119,9 @@ export type Campaign = {
   message: MessageContent;
   bot_ids: number[];
   audience: Audience;
+  /** the broadcast this one was copied from */
   source_campaign_id: number | null;
   /** how many times this message has been sent (list responses) */
-  send_count?: number;
   scheduled_at: string | null;
   started_at: string | null;
   finished_at: string | null;
@@ -139,7 +139,8 @@ export type CampaignBotStats = {
   error: string | null;
 };
 
-export type RelatedSend = {
+/** A broadcast this one was copied from, or a copy of it. */
+export type RelatedCampaign = {
   id: number;
   name: string;
   status: CampaignStatus;
@@ -152,7 +153,12 @@ export type RelatedSend = {
 
 export type ShareInfo = { token: string; hide_message: boolean };
 
-export type CampaignDetail = Campaign & { bots: CampaignBotStats[]; sends: RelatedSend[]; share: ShareInfo | null };
+export type CampaignDetail = Campaign & {
+  bots: CampaignBotStats[];
+  copied_from: RelatedCampaign | null;
+  copies: RelatedCampaign[];
+  share: ShareInfo | null;
+};
 
 export type Person = {
   chat_id: number;

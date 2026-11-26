@@ -8,7 +8,8 @@ function describe(e: ActivityEntry): string {
   const d = e.details as Record<string, string | number | boolean | null | string[]>;
   switch (e.action) {
     case "campaign.created": return "created this broadcast";
-    case "campaign.resend_created": return "created this as a resend";
+    case "campaign.copied": return "created this as a copy";
+    case "campaign.resend_created": return "created this as a copy";
     case "campaign.launched": return "sent it";
     case "campaign.scheduled": return `scheduled it for ${when(d.scheduled_at as string)}`;
     case "campaign.unscheduled": return "unscheduled it";

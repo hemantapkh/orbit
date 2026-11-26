@@ -21,7 +21,6 @@ const query = (statuses: CampaignStatus[], q: string, offset: number, limit = PA
   new URLSearchParams([
     ...statuses.map((s) => ["status", s]),
     ...(q ? [["q", q]] : []),
-    ["group", "true"],
     ["limit", String(limit)],
     ["offset", String(offset)],
   ]);
@@ -187,11 +186,6 @@ function Row({ c, botName, onDelete, deleting, canDelete }: { c: Campaign; botNa
       <Link to={c.status === "draft" ? `/broadcasts/${c.id}/edit` : `/broadcasts/${c.id}`} className="min-w-0">
         <span className="flex items-center gap-2">
           <span className="truncate font-medium group-hover:underline group-hover:underline-offset-4">{c.name}</span>
-          {(c.send_count ?? 1) > 1 && (
-            <span className="shrink-0 rounded-md bg-accent-wash px-1.5 py-0.5 text-xs font-medium text-accent-deep">
-              {c.send_count} sends
-            </span>
-          )}
         </span>
         <span className="block truncate text-sm text-ink-faint">{audience}</span>
       </Link>
