@@ -11,6 +11,7 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     Column,
+    DateTime,
     MetaData,
     String,
     Table,
@@ -75,6 +76,8 @@ SUGGESTIONS: dict[str, list[str]] = {
     "is_premium": ["is_premium", "premium"],
     "title": ["title", "chat_title"],
     "member_count": ["member_count", "members_count", "participants_count"],
+    "status_changed_at": ["status_changed_at", "chat_status_at"],
+    "unreachable_at": ["unreachable_at"],
 }
 
 # Telegram ChatMember.status values for a chat the bot can still message.
@@ -403,10 +406,10 @@ def where_clause(src: Resolved, spec: SourceSpec) -> ColumnElement[bool]:
     return and_(*conds)
 
 
-def lost_query(src: Resolved, spec: SourceSpec):
+def lost_query(src: Resolved, spec: SourceSpec, *extra: ColumnElement[bool]):
     """Chats the bot's records mark unreachable, with what's known about why.
 
-    None when neither status nor unreachable reason is mapped."""
+    None when neither status nor unreachable reason is mapped. `extra` narrows it down."""
     reach = _reachability(src, spec)
     if not reach:
         return None
@@ -415,7 +418,33 @@ def lost_query(src: Resolved, spec: SourceSpec):
     for fld in ("status", "unreachable_reason", "chat_type"):
         if ref := getattr(m, fld):
             cols.append(_value(src, ref).label(fld))
-    return select(*cols).where(known_clause(src, spec), ~and_(*reach))
+    return select(*cols).where(known_clause(src, spec), ~and_(*reach), *extra)
+
+
+def at_or_after(src: Resolved, ref: str, dialect: str, moment: datetime) -> ColumnElement[bool]:
+    """mapped time column >= moment, comparing like with like.
+
+    timestamptz gets an aware UTC value, timestamp without time zone a naive UTC one, and a
+    text column on Postgres is cast to a timestamp first."""
+    return _time(src, ref, dialect, moment, after=True)
+
+
+def before(src: Resolved, ref: str, dialect: str, moment: datetime) -> ColumnElement[bool]:
+    return _time(src, ref, dialect, moment, after=False)
+
+
+def _time(src: Resolved, ref: str, dialect: str, moment: datetime, after: bool):
+    col, _ = src.column(ref)
+    value = _value(src, ref)
+    try:
+        is_time = col.type.python_type in (datetime, date)
+    except NotImplementedError:
+        is_time = False
+    aware = is_time and bool(getattr(col.type, "timezone", False))
+    if dialect == "postgresql" and not is_time:
+        value = cast(value, DateTime)
+    bound = moment if aware or dialect != "postgresql" else moment.replace(tzinfo=None)
+    return value >= bound if after else value < bound
 
 
 def lost_reason(row) -> str:

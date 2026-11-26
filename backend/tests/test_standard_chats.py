@@ -14,16 +14,109 @@ from tests.conftest import _tmp, connect_bot, drain
 NOW = datetime.now(UTC)
 DAY = timedelta(days=1)
 
-# id, type, first_name, title, username, status, unreachable_reason, premium, members, last active
+HOUR = timedelta(hours=1)
+
+# id, type, first_name, title, username, status, unreachable_reason, premium, members,
+# last active, joined, status changed, unreachable since
 CHATS = [
-    (1, "private", "Ana", None, "ana", "member", None, 1, None, NOW - 9 * DAY),
-    (2, "private", "Bob", None, "bob", "kicked", None, 0, None, NOW - 30 * DAY),  # blocked
-    (3, "private", None, None, None, "member", "deactivated", 0, None, None),  # deleted
-    (4, "private", "Cy", None, None, "member", "chat_not_found", 0, None, None),
-    (5, "private", "Dee", None, "dee", "member", None, 0, None, NOW),  # back today
-    (-100, "supergroup", None, "Movie club", "movies", "administrator", None, None, 50, NOW),
-    (-200, "group", None, "Old group", None, "left", None, None, 9, None),  # bot removed
+    (
+        1,
+        "private",
+        "Ana",
+        None,
+        "ana",
+        "member",
+        None,
+        1,
+        None,
+        NOW - 9 * DAY,
+        NOW - 30 * HOUR,
+        None,
+        None,
+    ),
+    (
+        2,
+        "private",
+        "Bob",
+        None,
+        "bob",
+        "kicked",
+        None,
+        0,
+        None,
+        NOW - 30 * DAY,
+        NOW - 60 * DAY,
+        NOW - 2 * HOUR,
+        None,
+    ),
+    (
+        3,
+        "private",
+        None,
+        None,
+        None,
+        "member",
+        "deactivated",
+        0,
+        None,
+        None,
+        NOW - 60 * DAY,
+        None,
+        NOW - 30 * DAY,
+    ),
+    (
+        4,
+        "private",
+        "Cy",
+        None,
+        None,
+        "member",
+        "chat_not_found",
+        0,
+        None,
+        None,
+        NOW - 60 * DAY,
+        None,
+        None,
+    ),
+    (5, "private", "Dee", None, "dee", "member", None, 0, None, NOW, NOW - 2 * HOUR, None, None),
+    (
+        -100,
+        "supergroup",
+        None,
+        "Movie club",
+        "movies",
+        "administrator",
+        None,
+        None,
+        50,
+        NOW,
+        NOW - 2 * HOUR,
+        None,
+        None,
+    ),
+    (
+        -200,
+        "group",
+        None,
+        "Old group",
+        None,
+        "left",
+        None,
+        None,
+        9,
+        None,
+        NOW - 60 * DAY,
+        NOW - 3 * DAY,
+        None,
+    ),
 ]
+
+
+def stamp(t: datetime | None) -> str | None:
+    """How SQLAlchemy stores a datetime in SQLite (UTC, no offset)."""
+    return t.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S.%f") if t else None
+
 
 MAPPING = {
     "chat_id": "id",
@@ -38,6 +131,8 @@ MAPPING = {
     "is_premium": "is_premium",
     "title": "title",
     "member_count": "member_count",
+    "status_changed_at": "status_changed_at",
+    "unreachable_at": "unreachable_at",
 }
 
 
@@ -49,13 +144,15 @@ def make_chats_db(name: str) -> str:
         "CREATE TABLE chats (id BIGINT PRIMARY KEY, type TEXT, first_name TEXT, title TEXT, "
         "username TEXT, status TEXT, unreachable_reason TEXT, is_premium BOOLEAN, "
         "member_count INTEGER, last_active_at TIMESTAMP, created_at TIMESTAMP, "
+        "status_changed_at TIMESTAMP, unreachable_at TIMESTAMP, "
         "is_reachable BOOLEAN GENERATED ALWAYS AS (status IN "
         "('creator', 'administrator', 'member', 'restricted') AND unreachable_reason IS NULL))"
     )
     con.executemany(
         "INSERT INTO chats (id, type, first_name, title, username, status, unreachable_reason, "
-        "is_premium, member_count, last_active_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        [(*c[:9], c[9].isoformat() if c[9] else None, (NOW - DAY).isoformat()) for c in CHATS],
+        "is_premium, member_count, last_active_at, created_at, status_changed_at, unreachable_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [(*c[:9], *(stamp(t) for t in c[9:])) for c in CHATS],
     )
     con.commit()
     con.close()
@@ -140,3 +237,13 @@ async def test_audience_analytics_profile(client):
     assert r["chat_types"]["group_members"][key] == 50
     assert (r["premium"]["premium"][key], r["premium"]["people"][key]) == (1, 2)
     assert r["chat_types"]["missing"] == [] and r["premium"]["missing"] == []
+
+
+async def test_overview_last_24_hours(client):
+    bot = await connect_bot(client, 0)
+    await connect_chats(client, bot["id"], "overview")
+    line = next(b for b in (await client.get("/overview")).json()["bots"] if b["id"] == bot["id"])
+    assert (line["joined_24h"], line["joined_prev_24h"]) == (2, 1)  # Dee, the group; Ana
+    assert (line["active_24h"], line["active_7d"]) == (2, 2)  # Ana was 9 days ago
+    assert line["lost_24h"] == {"blocked": 1}  # Bob; the group left 3 days ago
+    assert line["maps_status"] is True

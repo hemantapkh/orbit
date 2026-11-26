@@ -19,6 +19,8 @@ MAPPED_FIELDS = (
     "is_premium",
     "title",
     "member_count",
+    "status_changed_at",
+    "unreachable_at",
 )
 
 
@@ -39,6 +41,9 @@ class ColumnMap(BaseModel):
     is_premium: str | None = Field(default=None, max_length=128)
     title: str | None = Field(default=None, max_length=128)
     member_count: str | None = Field(default=None, max_length=128)
+    # When the status last changed / the chat became unreachable: dates the losses.
+    status_changed_at: str | None = Field(default=None, max_length=128)
+    unreachable_at: str | None = Field(default=None, max_length=128)
 
     def mapped(self) -> dict[str, str]:
         return {k: v for k, v in self.model_dump().items() if v}
