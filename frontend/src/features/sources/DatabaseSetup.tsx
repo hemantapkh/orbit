@@ -374,7 +374,7 @@ function Mapping({
   const saved = (existing?.column_map ?? {}) as Partial<ColumnMap>;
   const used = new Set(Object.values(saved).filter(Boolean));
   const fresh = (Object.keys(table.suggested) as MappedField[]).filter(
-    (k) => !saved[k] && !used.has(table.suggested[k]),
+    (k) => !saved[k] && !used.has(table.suggested[k] ?? null),
   );
   const initial = {
     ...Object.fromEntries(fresh.map((k) => [k, table.suggested[k]])),
