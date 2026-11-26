@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { ArrowDown, ChevronLeft, ChevronRight, Search, SlidersHorizontal, X } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { BotAvatar } from "../../components/BotAvatar";
 import { Button, cx, Dialog, fieldClass, Input, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
@@ -8,13 +8,14 @@ import { api, type Bot, type PeoplePage as Page, type PersonCategory, type Perso
 import { ago, fmt, when } from "../../lib/format";
 
 /** Filters live in the URL, so a filtered list can be bookmarked or shared with the team. */
+/** Filters in the panel. Each holds one URL parameter; "" means no filter. */
 const FILTERS: { key: string; label: string; options: [string, string][] }[] = [
-  { key: "kind", label: "Type", options: [["", "Any type"], ["people", "People"], ["groups", "Groups"], ["channels", "Channels"]] },
+  { key: "kind", label: "Type", options: [["", "Any"], ["people", "People"], ["groups", "Groups"], ["channels", "Channels"]] },
   {
     key: "status",
     label: "Status",
     options: [
-      ["", "Any status"],
+      ["", "Any"],
       ["can_receive", "Can receive"],
       ["blocked", "Blocked the bot"],
       ["deleted", "Deleted account"],
@@ -26,24 +27,21 @@ const FILTERS: { key: string; label: string; options: [string, string][] }[] = [
     key: "active",
     label: "Last active",
     options: [
-      ["", "Any activity"],
-      ["24h", "Active in 24 hours"],
-      ["7d", "Active in 7 days"],
-      ["30d", "Active in 30 days"],
-      ["90d", "Active in 90 days"],
-      ["dormant_30d", "Not active for 30 days"],
-      ["dormant_90d", "Not active for 90 days"],
-      ["never", "Never active"],
+      ["", "Any time"],
+      ["24h", "In the last 24 hours"],
+      ["7d", "In the last 7 days"],
+      ["30d", "In the last 30 days"],
+      ["90d", "In the last 90 days"],
+      ["dormant_30d", "Not for 30 days"],
+      ["dormant_90d", "Not for 90 days"],
+      ["never", "Never"],
     ],
   },
-  {
-    key: "joined",
-    label: "Joined",
-    options: [["", "Joined any time"], ["24h", "Joined in 24 hours"], ["7d", "Joined in 7 days"], ["30d", "Joined in 30 days"], ["90d", "Joined in 90 days"]],
-  },
-  { key: "premium", label: "Premium", options: [["", "Premium or not"], ["true", "Premium"], ["false", "Not Premium"]] },
-  { key: "sort", label: "Sort", options: [["", "Recently active first"], ["joined", "Recently joined first"]] },
+  { key: "joined", label: "Joined", options: [["", "Any time"], ["24h", "In the last 24 hours"], ["7d", "In the last 7 days"], ["30d", "In the last 30 days"], ["90d", "In the last 90 days"]] },
+  { key: "premium", label: "Premium", options: [["", "Any"], ["true", "Premium"], ["false", "Not Premium"]] },
+  { key: "multi", label: "Bots used", options: [["", "Any number"], ["true", "2 or more bots"]] },
 ];
+const PANEL_KEYS = [...FILTERS.map((f) => f.key), "language"];
 
 const CATEGORY: Record<PersonCategory, { label: string; dot: string }> = {
   can_receive: { label: "Can receive", dot: "bg-status-ok" },
@@ -96,6 +94,7 @@ export function PeoplePage() {
   });
 
   const filtered = [...params.keys()].some((k) => k !== "page" && k !== "sort");
+  const sort = params.get("sort") === "joined" ? "joined" : "last_active";
   const d = list.data;
   const pages = d ? Math.max(1, Math.ceil(d.total / SIZE)) : 1;
   const name = (id: number | string) => `@${botById.get(Number(id))?.username ?? `bot ${id}`}`;
@@ -104,59 +103,30 @@ export function PeoplePage() {
     <>
       <PageHeader title="People" lede="Everyone your bots know, across all of them. Filter to find a group of people, or open one to see their record." />
 
-      <div className="mb-5 space-y-3">
-        <div className="flex flex-wrap gap-2">
-          <label className="relative min-w-[220px] flex-[2_1_240px]">
-            <span className="sr-only">Search</span>
-            <Search size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-faint" />
-            <Input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Name, @username or Telegram ID" className="pl-9" />
-          </label>
-          <select aria-label="Bot" value={params.get("bot") ?? ""} onChange={(e) => set("bot", e.target.value)} className={cx(fieldClass, "h-10 w-auto flex-[1_1_160px]")}>
-            <option value="">All bots</option>
-            {(bots.data ?? []).map((b) => (
-              <option key={b.id} value={b.id}>@{b.username}</option>
-            ))}
-          </select>
-          <Input
-            aria-label="Language"
-            placeholder="Language, e.g. en"
-            value={params.get("language") ?? ""}
-            onChange={(e) => set("language", e.target.value.trim())}
-            className="w-auto flex-[0_1_150px]"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {FILTERS.map((f) => (
-            <select
-              key={f.key}
-              aria-label={f.label}
-              value={params.get(f.key) ?? ""}
-              onChange={(e) => set(f.key, e.target.value)}
-              className={cx(fieldClass, "h-9 w-auto text-sm", params.get(f.key) && f.key !== "sort" && "border-accent")}
-            >
-              {f.options.map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <label className="relative min-w-[200px] flex-[1_1_280px]">
+          <span className="sr-only">Search</span>
+          <Search size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-faint" />
+          <Input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Search name, @username or Telegram ID" className="pl-9" />
+        </label>
+        <select aria-label="Bot" value={params.get("bot") ?? ""} onChange={(e) => set("bot", e.target.value)} className={cx(fieldClass, "h-10 w-auto max-w-[220px]")}>
+          <option value="">All bots</option>
+          {(bots.data ?? []).map((b) => (
+            <option key={b.id} value={b.id}>@{b.username}</option>
           ))}
-          <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-line bg-surface px-3 text-sm">
-            <input type="checkbox" checked={params.get("multi") === "true"} onChange={(e) => set("multi", e.target.checked ? "true" : "")} />
-            On 2 or more bots
-          </label>
-          {filtered && (
-            <button
-              type="button"
-              onClick={() => {
-                setTerm("");
-                setParams(new URLSearchParams(params.get("sort") ? { sort: params.get("sort")! } : {}), { replace: true });
-              }}
-              className="px-2 text-sm text-accent-deep underline-offset-4 hover:underline"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
+        </select>
+        <FilterPanel params={params} set={set} />
       </div>
+
+      <ActiveFilters
+        params={params}
+        set={set}
+        onClear={() => {
+          setTerm("");
+          setParams(new URLSearchParams(params.get("sort") ? { sort: params.get("sort")! } : {}), { replace: true });
+        }}
+        botName={(id) => name(id)}
+      />
 
       {list.error && <Notice>{list.error.message}</Notice>}
       {d && Object.keys(d.errors).length > 0 && (
@@ -176,10 +146,19 @@ export function PeoplePage() {
         <Skeleton className="h-96" />
       ) : d ? (
         <>
-          <p className="mb-3 text-sm text-ink-soft">
-            <span className="text-lg font-semibold text-ink">{fmt(d.total)}</span> {d.total === 1 ? "match" : "matches"}
-            {list.isFetching && <span className="ml-2 text-ink-faint">updating…</span>}
-          </p>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-ink-soft">
+              <span className="text-lg font-semibold text-ink">{fmt(d.total)}</span> {d.total === 1 ? "match" : "matches"}
+              {list.isFetching && <span className="ml-2 text-ink-faint">updating…</span>}
+            </p>
+            <label className="flex items-center gap-2 text-sm text-ink-soft">
+              Sort by
+              <select value={sort} onChange={(e) => set("sort", e.target.value === "last_active" ? "" : e.target.value)} className={cx(fieldClass, "h-9 w-auto text-sm")}>
+                <option value="last_active">Last active, newest first</option>
+                <option value="joined">Joined, newest first</option>
+              </select>
+            </label>
+          </div>
           {d.items.length === 0 ? (
             <Panel className="px-6 py-12 text-center text-ink-soft">
               {filtered ? "Nobody matches these filters." : "No people yet. Connect a bot's database to see who it reaches."}
@@ -193,8 +172,8 @@ export function PeoplePage() {
                     <th className="px-4 py-3 font-medium">Bots</th>
                     <th className="px-4 py-3 font-medium">Type</th>
                     <th className="px-4 py-3 font-medium">Language</th>
-                    <th className="px-4 py-3 font-medium">Joined</th>
-                    <th className="px-5 py-3 font-medium">Last active</th>
+                    <SortHeader label="Joined" value="joined" sort={sort} onSort={(v) => set("sort", v)} className="px-4" />
+                    <SortHeader label="Last active" value="last_active" sort={sort} onSort={(v) => set("sort", v === "last_active" ? "" : v)} className="px-5" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -346,5 +325,101 @@ function Fact({ label, value }: { label: string; value: ReactNode }) {
       <dt className="text-ink-faint">{label}</dt>
       <dd className="mt-0.5 truncate font-medium">{value}</dd>
     </div>
+  );
+}
+
+/** "Filters" button with a count; opens a small panel with the rest of the filters. */
+function FilterPanel({ params, set }: { params: URLSearchParams; set: (k: string, v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const count = PANEL_KEYS.filter((k) => params.get(k)).length;
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <Button onClick={() => setOpen((o) => !o)} aria-expanded={open} className={cx(count > 0 && "border-accent")}>
+        <SlidersHorizontal size={15} />
+        Filters
+        {count > 0 && <span className="rounded-full bg-accent-wash px-1.5 text-xs font-semibold text-accent-deep">{count}</span>}
+      </Button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-2 w-[min(560px,calc(100vw-32px))] rounded-xl border border-line bg-surface p-4 shadow-[0_18px_40px_-18px_rgba(23,33,30,0.35)]">
+          <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+            {FILTERS.map((f) => (
+              <label key={f.key} className="text-sm">
+                <span className="mb-1 block text-ink-soft">{f.label}</span>
+                <select value={params.get(f.key) ?? ""} onChange={(e) => set(f.key, e.target.value)} className={cx(fieldClass, "h-9 text-sm")}>
+                  {f.options.map(([v, l]) => (
+                    <option key={v} value={v}>{l}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+            <label className="text-sm">
+              <span className="mb-1 block text-ink-soft">Language</span>
+              <Input key={params.get("language") ?? ""} defaultValue={params.get("language") ?? ""} onBlur={(e) => set("language", e.target.value.trim())} onKeyDown={(e) => e.key === "Enter" && set("language", e.currentTarget.value.trim())} placeholder="Code, e.g. en or ne" className="h-9 text-sm" />
+            </label>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button size="sm" variant="primary" onClick={() => setOpen(false)}>Done</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The filters in use, as chips that remove themselves. Hidden when nothing is filtered. */
+function ActiveFilters({ params, set, onClear, botName }: { params: URLSearchParams; set: (k: string, v: string) => void; onClear: () => void; botName: (id: string) => string }) {
+  const chips: { key: string; text: string }[] = [];
+  if (params.get("q")) chips.push({ key: "q", text: `“${params.get("q")}”` });
+  if (params.get("bot")) chips.push({ key: "bot", text: botName(params.get("bot")!) });
+  for (const f of FILTERS) {
+    const v = params.get(f.key);
+    const label = f.options.find(([o]) => o === v)?.[1];
+    if (v && label) chips.push({ key: f.key, text: `${f.label}: ${label}` });
+  }
+  if (params.get("language")) chips.push({ key: "language", text: `Language: ${params.get("language")}` });
+  if (!chips.length) return null;
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      {chips.map((c) => (
+        <button
+          key={c.key}
+          type="button"
+          onClick={() => set(c.key, "")}
+          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface py-1 pr-2 pl-3 text-sm hover:border-line-strong"
+          title="Remove this filter"
+        >
+          {c.text}
+          <X size={13} className="text-ink-faint" />
+        </button>
+      ))}
+      <button type="button" onClick={onClear} className="px-1 text-sm text-accent-deep underline-offset-4 hover:underline">
+        Clear all
+      </button>
+    </div>
+  );
+}
+
+function SortHeader({ label, value, sort, onSort, className }: { label: string; value: string; sort: string; onSort: (v: string) => void; className?: string }) {
+  const on = sort === value;
+  return (
+    <th className={cx("py-3 font-medium", className)} aria-sort={on ? "descending" : "none"}>
+      <button type="button" onClick={() => onSort(value)} className={cx("inline-flex items-center gap-1 hover:text-ink", on && "text-ink")}>
+        {label}
+        <ArrowDown size={13} className={cx(!on && "opacity-0")} />
+      </button>
+    </th>
   );
 }
