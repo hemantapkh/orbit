@@ -35,9 +35,9 @@ async def test_selected_people_resend_and_activity(client, telegram_fake, delive
     await drain(delivery_engine)
     assert [m["chat_id"] for m in telegram_fake.sent] == [11]  # 13 blocked the bot
 
-    # resend to everyone: same message, linked to the original
+    # send again to everyone: a new broadcast, same message, linked as a copy
     again = (await client.post(f"/campaigns/{c['id']}/duplicate")).json()
-    assert again["source_campaign_id"] == c["id"] and again["name"] == "Test group"
+    assert again["source_campaign_id"] == c["id"] and again["name"] == "Test group (2)"
     r = await client.patch(f"/campaigns/{again['id']}", json={"audience": {"mode": "all"}})
     assert r.status_code == 200
     await client.post(f"/campaigns/{again['id']}/launch", json={})
@@ -45,10 +45,12 @@ async def test_selected_people_resend_and_activity(client, telegram_fake, delive
     assert sorted(m["chat_id"] for m in telegram_fake.sent) == [11, 11, 12, 14, 15]
 
     third = (await client.post(f"/campaigns/{again['id']}/duplicate")).json()
-    assert third["source_campaign_id"] == c["id"]  # always points at the first send
-    detail = (await client.get(f"/campaigns/{c['id']}")).json()
-    assert [s["id"] for s in detail["sends"]] == [c["id"], again["id"], third["id"]]
-    assert [s["stats"]["sent"] for s in detail["sends"]] == [1, 4, 0]
+    assert third["source_campaign_id"] == again["id"]  # copied from the one it was made from
+    assert third["name"] == "Test group (3)"
+    detail = (await client.get(f"/campaigns/{again['id']}")).json()
+    assert detail["copied_from"]["id"] == c["id"] and detail["copied_from"]["stats"]["sent"] == 1
+    assert [x["id"] for x in detail["copies"]] == [third["id"]]
+    assert detail["stats"]["sent"] == 4  # its own sends only
 
     log = (
         await client.get("/activity", params={"entity_type": "campaign", "entity_id": c["id"]})
@@ -107,18 +109,20 @@ async def test_delete_any_broadcast_except_while_sending(client, telegram_fake, 
     await drain(delivery_engine)
 
     second = (await client.post(f"/campaigns/{first['id']}/duplicate")).json()
-    third = (await client.post(f"/campaigns/{first['id']}/duplicate")).json()
+    third = (await client.post(f"/campaigns/{second['id']}/duplicate")).json()
 
-    # deleting the original (completed) keeps the resends grouped under the oldest one
-    assert (await client.delete(f"/campaigns/{first['id']}")).status_code == 204
-    assert (await client.get(f"/campaigns/{first['id']}")).status_code == 404
+    # deleting one in the middle: its copy now counts as copied from what it came from
+    assert (await client.delete(f"/campaigns/{second['id']}")).status_code == 204
+    assert (await client.get(f"/campaigns/{second['id']}")).status_code == 404
     detail = (await client.get(f"/campaigns/{third['id']}")).json()
-    assert detail["source_campaign_id"] == second["id"]
-    assert [s["id"] for s in detail["sends"]] == [second["id"], third["id"]]
+    assert detail["source_campaign_id"] == first["id"]
+    assert (await client.delete(f"/campaigns/{first['id']}")).status_code == 204
+    detail = (await client.get(f"/campaigns/{third['id']}")).json()
+    assert detail["source_campaign_id"] is None and detail["copied_from"] is None
     assert (await client.get(f"/campaigns/{first['id']}/deliveries")).status_code == 404
 
 
-async def test_list_search_and_group_resends(client):
+async def test_every_send_is_its_own_broadcast_in_the_list(client):
     a = await connect_bot(client, 0)
     first = (
         await client.post("/campaigns", json={"name": "Dashain greetings", "bot_ids": [a["id"]]})
@@ -126,13 +130,14 @@ async def test_list_search_and_group_resends(client):
     again = (await client.post(f"/campaigns/{first['id']}/duplicate")).json()
     await client.post("/campaigns", json={"name": "Tihar offer", "bot_ids": [a["id"]]})
 
-    flat = (await client.get("/campaigns")).json()
-    assert flat["total"] == 3
+    listed = (await client.get("/campaigns")).json()
+    assert listed["total"] == 3
+    assert [x["name"] for x in listed["items"]] == [
+        "Tihar offer",
+        "Dashain greetings (2)",
+        "Dashain greetings",
+    ]
+    assert again["source_campaign_id"] == first["id"]
 
-    grouped = (await client.get("/campaigns", params={"group": "true"})).json()
-    assert grouped["total"] == 2
-    dashain = next(x for x in grouped["items"] if x["name"] == "Dashain greetings")
-    assert dashain["id"] == again["id"] and dashain["send_count"] == 2
-
-    found = (await client.get("/campaigns", params={"q": "TIHAR", "group": "true"})).json()
+    found = (await client.get("/campaigns", params={"q": "TIHAR"})).json()
     assert [x["name"] for x in found["items"]] == ["Tihar offer"]

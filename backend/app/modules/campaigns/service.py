@@ -1,4 +1,5 @@
 import math
+import re
 from collections import defaultdict
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
@@ -27,7 +28,7 @@ from app.modules.campaigns.schemas import (
     DeliveryStats,
     ErrorGroup,
     ProgressOut,
-    RelatedSend,
+    RelatedCampaign,
     ShareOut,
     TimelinePoint,
 )
@@ -119,17 +120,36 @@ async def detail(session: AsyncSession, c: Campaign) -> CampaignDetail:
             )
         ).all()
     )
-    root = c.source_campaign_id or c.id
-    family = (
+    copies = (
         await session.scalars(
             select(Campaign)
-            .where((Campaign.id == root) | (Campaign.source_campaign_id == root))
+            .where(Campaign.source_campaign_id == c.id, Campaign.org_id == c.org_id)
             .order_by(Campaign.created_at, Campaign.id)
         )
     ).all()
-    fam_ids = [f.id for f in family]
-    fam_stats = await delivery_stats(session, fam_ids)
-    fam_bots = await bot_ids_for(session, fam_ids)
+    source = (
+        await session.scalar(
+            select(Campaign).where(Campaign.id == c.source_campaign_id, Campaign.org_id == c.org_id)
+        )
+        if c.source_campaign_id
+        else None
+    )
+    related = ([source] if source else []) + list(copies)
+    related_ids = [r.id for r in related]
+    rel_stats = await delivery_stats(session, related_ids)
+    rel_bots = await bot_ids_for(session, related_ids)
+
+    def related_out(r: Campaign) -> RelatedCampaign:
+        return RelatedCampaign(
+            id=r.id,
+            name=r.name,
+            status=r.status,
+            created_at=r.created_at,
+            started_at=r.started_at,
+            audience_mode=(r.audience or {}).get("mode", "all"),
+            bot_ids=sorted(rel_bots[r.id]),
+            stats=rel_stats[r.id],
+        )
 
     out = to_out(c, bot_ids, stats)
     return CampaignDetail(
@@ -137,19 +157,8 @@ async def detail(session: AsyncSession, c: Campaign) -> CampaignDetail:
         share=ShareOut(token=c.share_token, hide_message=c.share_hide_message)
         if c.share_token
         else None,
-        sends=[
-            RelatedSend(
-                id=f.id,
-                name=f.name,
-                status=f.status,
-                created_at=f.created_at,
-                started_at=f.started_at,
-                audience_mode=(f.audience or {}).get("mode", "all"),
-                bot_ids=sorted(fam_bots[f.id]),
-                stats=fam_stats[f.id],
-            )
-            for f in family
-        ],
+        copied_from=related_out(source) if source else None,
+        copies=[related_out(r) for r in copies],
         bots=[
             CampaignBotStats(
                 bot_id=b.id,
@@ -292,3 +301,22 @@ async def progress(session: AsyncSession, c: Campaign, rate_per_bot: float) -> P
             for bot, st, err, n in err_rows
         ],
     )
+
+
+_NUMBERED = re.compile(r"^(?P<base>.*?)(?: \((?P<n>\d+)\))?$")
+
+
+async def copy_name(session: AsyncSession, org_id: int, name: str) -> str:
+    """ "Name (2)", or the next free number: copies are easy to tell apart in the list."""
+    own = _NUMBERED.match(name)
+    base = (own.group("base") if own else "") or name
+    taken = (
+        await session.scalars(
+            select(Campaign.name).where(Campaign.org_id == org_id, Campaign.name.like(f"{base}%"))
+        )
+    ).all()
+    numbers = [1]
+    for other in taken:
+        if (mm := _NUMBERED.match(other)) and mm.group("base") == base:
+            numbers.append(int(mm.group("n") or 1))
+    return f"{base} ({max(numbers) + 1})"[:160]

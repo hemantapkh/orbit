@@ -64,8 +64,7 @@ class CampaignOut(BaseModel):
     message: MessageContent
     bot_ids: list[int]
     audience: Audience
-    source_campaign_id: int | None
-    send_count: int = 1  # sends of this message so far (lists only)
+    source_campaign_id: int | None  # the broadcast this one was copied from
     scheduled_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
@@ -74,7 +73,9 @@ class CampaignOut(BaseModel):
     stats: DeliveryStats
 
 
-class RelatedSend(BaseModel):
+class RelatedCampaign(BaseModel):
+    """A broadcast this one was copied from, or a copy of it."""
+
     id: int
     name: str
     status: str
@@ -98,7 +99,8 @@ class ShareIn(BaseModel):
 class CampaignDetail(CampaignOut):
     share: ShareOut | None = None
     bots: list[CampaignBotStats]
-    sends: list[RelatedSend]  # every send of this message, oldest first (includes this one)
+    copied_from: RelatedCampaign | None = None
+    copies: list[RelatedCampaign] = []  # made from this one, oldest first
 
 
 class CampaignPage(BaseModel):

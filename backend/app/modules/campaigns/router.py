@@ -3,7 +3,7 @@ import secrets
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.core.config import get_settings
 from app.core.db import utcnow
@@ -98,20 +98,15 @@ async def list_campaigns(
     m: Viewer,
     status_: list[CampaignStatus] | None = Query(default=None, alias="status"),
     q: str | None = Query(default=None, max_length=160),
-    group: bool = Query(default=False, description="Only the latest send of each message"),
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    family = func.coalesce(Campaign.source_campaign_id, Campaign.id)
     conds = [Campaign.org_id == m.org_id]
     if status_:
         conds.append(Campaign.status.in_(status_))
     if q and q.strip():
         conds.append(func.lower(Campaign.name).like(f"%{q.strip().lower()}%"))
     base = select(Campaign).where(*conds)
-    if group:
-        latest = select(func.max(Campaign.id)).where(*conds).group_by(family)
-        base = select(Campaign).where(Campaign.id.in_(latest))
     total = await session.scalar(select(func.count()).select_from(base.subquery()))
     items = (
         await session.scalars(
@@ -123,22 +118,8 @@ async def list_campaigns(
     ids = [c.id for c in items]
     bots = await service.bot_ids_for(session, ids)
     stats = await service.delivery_stats(session, ids)
-    roots = {c.id: c.source_campaign_id or c.id for c in items}
-    sends = dict(
-        (
-            await session.execute(
-                select(family, func.count()).where(family.in_(set(roots.values()))).group_by(family)
-            )
-        ).all()
-    )
     return CampaignPage(
-        items=[
-            service.to_out(c, bots[c.id], stats[c.id]).model_copy(
-                update={"send_count": sends.get(roots[c.id], 1)}
-            )
-            for c in items
-        ],
-        total=total,
+        items=[service.to_out(c, bots[c.id], stats[c.id]) for c in items], total=total
     )
 
 
@@ -242,20 +223,12 @@ async def delete_campaign(campaign_id: int, session: SessionDep, m: Sender):
         raise HTTPException(
             status.HTTP_409_CONFLICT, "This broadcast is sending. Pause or stop it first."
         )
-    # Keep resends grouped: if this is the original, the oldest resend becomes the new one.
-    if c.source_campaign_id is None:
-        resends = (
-            await session.scalars(
-                select(Campaign)
-                .where(Campaign.source_campaign_id == c.id)
-                .order_by(Campaign.created_at, Campaign.id)
-            )
-        ).all()
-        if resends:
-            new_root = resends[0]
-            new_root.source_campaign_id = None
-            for r in resends[1:]:
-                r.source_campaign_id = new_root.id
+    # Its copies now count as copied from whatever this one was copied from.
+    await session.execute(
+        update(Campaign)
+        .where(Campaign.source_campaign_id == c.id)
+        .values(source_campaign_id=c.source_campaign_id)
+    )
     record(
         session,
         m.user,
@@ -272,16 +245,16 @@ async def delete_campaign(campaign_id: int, session: SessionDep, m: Sender):
 
 @router.post("/{campaign_id}/duplicate", response_model=CampaignDetail, status_code=201)
 async def duplicate_campaign(campaign_id: int, session: SessionDep, m: Sender):
+    """A new broadcast with the same message, bots and audience, linked as a copy."""
     src = await _get(session, campaign_id, m)
     bot_ids = (await service.bot_ids_for(session, [src.id]))[src.id]
-    root = src.source_campaign_id or src.id
     copy = Campaign(
         org_id=src.org_id,
-        name=src.name,
+        name=await service.copy_name(session, src.org_id, src.name),
         message=src.message,
         audience=src.audience,
         created_by_id=m.user.id,
-        source_campaign_id=root,
+        source_campaign_id=src.id,
     )
     session.add(copy)
     await session.flush()
@@ -289,11 +262,11 @@ async def duplicate_campaign(campaign_id: int, session: SessionDep, m: Sender):
     record(
         session,
         m.user,
-        "campaign.resend_created",
+        "campaign.copied",
         "campaign",
         copy.id,
         org_id=m.org_id,
-        source_campaign_id=root,
+        source_campaign_id=src.id,
     )
     await session.commit()
     await session.refresh(copy)
