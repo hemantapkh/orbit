@@ -107,7 +107,7 @@ function Board({ data }: { data: Overview }) {
         </div>
         <Panel className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="border-b border-line text-ink-soft">
+            <thead className="border-b border-line whitespace-nowrap text-ink-soft">
               <tr>
                 <th className="px-5 py-3 font-medium">Bot</th>
                 <th className="w-[30%] px-5 py-3 font-medium">Can receive</th>
@@ -216,7 +216,7 @@ function BotRow({ b, widest }: { b: Line; widest: number }) {
       <td className="px-4 py-3.5 text-right">
         {num(b.joined_24h)}
         {b.joined_24h != null && b.joined_prev_24h != null && (
-          <span className="block text-xs text-ink-faint">{fmt(b.joined_prev_24h)} the day before</span>
+          <span className="block text-xs whitespace-nowrap text-ink-faint">{fmt(b.joined_prev_24h)} the day before</span>
         )}
       </td>
       <td className="px-4 py-3.5 text-right">{num(b.active_24h)}</td>

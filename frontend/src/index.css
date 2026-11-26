@@ -39,7 +39,6 @@
 :root {
   color: var(--color-ink);
   background: var(--color-canvas);
-  font-feature-settings: "tnum" 1;
   -webkit-font-smoothing: antialiased;
 }
 

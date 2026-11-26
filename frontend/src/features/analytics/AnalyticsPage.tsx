@@ -216,7 +216,7 @@ function AudienceTab({ qs, range, picked, bots, selected, long }: { qs: URLSearc
         </Notice>
       )}
 
-      <div className="flex justify-end -mb-4">
+      <div className="flex justify-end">
         <CsvButton label="Download summary" onClick={() => exportSummary(d, bots, long)} />
       </div>
       <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
