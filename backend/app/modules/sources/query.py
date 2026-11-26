@@ -27,6 +27,7 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    true,
 )
 from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -458,6 +459,78 @@ def lost_reason(row) -> str:
     return "left" if kind in GROUP_TYPES else "blocked"
 
 
+def row_category(row) -> str:
+    """can_receive / blocked / left / deleted / unreachable / excluded for one chat row
+    that has a `can_receive` column (see detail_query)."""
+    if row.get("can_receive"):
+        return "can_receive"
+    reason = str(row.get("unreachable_reason") or "").lower()
+    status = str(row.get("status") or "").lower()
+    if reason or (status and status not in REACHABLE_STATUSES):
+        return lost_reason(row)
+    return "excluded"  # left out by the active flag
+
+
+def search_conditions(src: Resolved, spec: SourceSpec, q: str) -> list[ColumnElement[bool]]:
+    """Telegram ID exactly, or username/name/title as a case-insensitive substring."""
+    mapping = spec.column_map.mapped()
+    term = q.strip().lstrip("@")
+    conds: list[ColumnElement[bool]] = []
+    if term.lstrip("-").isdigit():
+        conds.append(cast(_chat(src, spec), String) == term)
+    pattern = f"%{term.lower()}%"
+    for fld in ("username", "first_name", "last_name", "title"):
+        if mapping.get(fld):
+            conds.append(func.lower(cast(_value(src, mapping[fld]), String)).like(pattern))
+    return conds
+
+
+def category_clause(
+    src: Resolved, spec: SourceSpec, category: str, orbit: dict[str, list[int]]
+) -> ColumnElement[bool] | None:
+    """Chats in one reachability category, per the bot's records plus Orbit's own failed
+    sends (`orbit`: reason -> chat_ids). None if the bot can't tell (nothing mapped)."""
+    if category == "can_receive":
+        return where_clause(src, spec)
+    m = spec.column_map
+    chat = _chat(src, spec)
+    reach = _reachability(src, spec)
+    reachable = and_(*reach) if reach else true()
+    reason = _value(src, m.unreachable_reason) if m.unreachable_reason else None
+    no_reason = _blank(reason) if reason is not None else true()
+    grouped = (
+        func.lower(cast(_value(src, m.chat_type), String)).in_(GROUP_TYPES)
+        if m.chat_type
+        else false()
+    )
+    status_lost = ~_on_related(src, m.status, _reachable_status) if m.status else None
+    orbit_ids = orbit.get(category, [])
+    from_orbit = and_(chat.in_(orbit_ids), reachable) if orbit_ids else None
+    own: ColumnElement[bool] | None = None
+    if category == "deleted" and reason is not None:
+        own = func.lower(cast(reason, String)) == "deactivated"
+    elif category == "unreachable" and reason is not None:
+        own = and_(~_blank(reason), func.lower(cast(reason, String)) != "deactivated")
+    elif category == "blocked" and status_lost is not None:
+        own = and_(no_reason, status_lost, ~grouped)
+    elif category == "left" and status_lost is not None:
+        own = and_(no_reason, status_lost, grouped)
+    parts = [c for c in (own, from_orbit) if c is not None]
+    return or_(*parts) if parts else None
+
+
+def detail_query(src: Resolved, spec: SourceSpec, chat_ids: list[int]):
+    """Every mapped field for these chats, plus whether each can receive a broadcast."""
+    chat = _chat(src, spec)
+    cols = [chat.label("chat_id")] + [
+        _value(src, ref).label(fld)
+        for fld, ref in spec.column_map.mapped().items()
+        if fld != "chat_id"
+    ]
+    cols.append(case((where_clause(src, spec), True), else_=False).label("can_receive"))
+    return select(*cols).where(known_clause(src, spec), chat.in_(chat_ids))
+
+
 def last_active_query(src: Resolved, spec: SourceSpec, chat_ids: list[int]):
     if not (ref := spec.column_map.last_active_at):
         raise SourceError('Map "Last active" first')
@@ -477,21 +550,13 @@ def search_query(src: Resolved, spec: SourceSpec, q: str, limit: int):
     Searches every known chat, including ones that can't be reached, and says which can
     (the `can_receive` column)."""
     mapping = spec.column_map.mapped()
-    chat = _chat(src, spec)
-    term = q.strip().lstrip("@")
-    conds = []
-    if term.lstrip("-").isdigit():
-        conds.append(cast(chat, String) == term)
-    pattern = f"%{term.lower()}%"
-    for fld in ("username", "first_name", "last_name", "title"):
-        if mapping.get(fld):
-            conds.append(func.lower(cast(_value(src, mapping[fld]), String)).like(pattern))
+    conds = search_conditions(src, spec, q)
     cols = [_value(src, ref).label(fld) for fld, ref in mapping.items()]
     cols.append(case((where_clause(src, spec), True), else_=False).label("can_receive"))
     return (
         select(*cols)
         .where(known_clause(src, spec), or_(*conds) if conds else false())
-        .order_by(chat)
+        .order_by(_chat(src, spec))
         .limit(limit)
     )
 

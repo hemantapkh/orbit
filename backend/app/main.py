@@ -26,6 +26,7 @@ from app.modules.media.router import router as media_router
 from app.modules.orgs.router import public as invites_router
 from app.modules.orgs.router import router as orgs_router
 from app.modules.overview.router import router as overview_router
+from app.modules.people.router import router as people_router
 from app.modules.sources.connection import engines as source_engines
 from app.modules.sources.router import router as sources_router
 
@@ -40,6 +41,7 @@ ADMIN_ROUTERS = [
     media_router,
     activity_router,
     analytics_router,
+    people_router,
 ]
 
 # No session; the share token in the URL is the credential (see campaigns/public.py).
