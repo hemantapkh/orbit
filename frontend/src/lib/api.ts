@@ -198,6 +198,13 @@ export type Overview = {
     is_active: boolean;
     token_valid: boolean;
     avatar_version: string | null;
+    /** last 24 hours; null when the field it needs isn't mapped */
+    joined_24h: number | null;
+    joined_prev_24h: number | null;
+    active_24h: number | null;
+    active_7d: number | null;
+    lost_24h: Partial<Record<"blocked" | "left" | "deleted" | "unreachable", number>> | null;
+    maps_status: boolean;
   })[];
   total_bots: number;
   total_active_subscribers: number;
@@ -234,7 +241,9 @@ export type MappedField =
   | "last_active_at"
   | "is_premium"
   | "title"
-  | "member_count";
+  | "member_count"
+  | "status_changed_at"
+  | "unreachable_at";
 
 export type ColumnMap = { chat_id: string } & Partial<Record<Exclude<MappedField, "chat_id">, string | null>>;
 

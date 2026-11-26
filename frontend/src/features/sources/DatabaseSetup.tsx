@@ -37,6 +37,8 @@ const FIELDS: { key: MappedField; label: string; help: string; group?: FieldGrou
   { key: "unreachable_reason", label: "Unreachable reason", help: "Set when the chat can't be messaged, e.g. deactivated. Rows with a value are left out.", group: "Reach" },
   { key: "chat_type", label: "Chat type", help: "private, group, supergroup or channel.", group: "Reach" },
   { key: "member_count", label: "Member count", help: "How many people are in a group or channel.", group: "Reach" },
+  { key: "status_changed_at", label: "Status changed at", help: "When the bot's status last changed, e.g. when someone blocked it.", group: "Reach" },
+  { key: "unreachable_at", label: "Unreachable since", help: "When the chat became unreachable, e.g. the account was deleted.", group: "Reach" },
 ];
 
 const OPS: { value: FilterOp; label: string; needsValue: boolean }[] = [
