@@ -12,6 +12,13 @@ MAPPED_FIELDS = (
     "language_code",
     "joined_at",
     "is_active",
+    "chat_type",
+    "status",
+    "unreachable_reason",
+    "last_active_at",
+    "is_premium",
+    "title",
+    "member_count",
 )
 
 
@@ -23,6 +30,15 @@ class ColumnMap(BaseModel):
     language_code: str | None = Field(default=None, max_length=128)
     joined_at: str | None = Field(default=None, max_length=128)
     is_active: str | None = Field(default=None, max_length=128)
+    # Optional reachability and profile fields. Values follow Telegram's vocabulary
+    # (chat type: private/group/supergroup/channel; status: ChatMember.status).
+    chat_type: str | None = Field(default=None, max_length=128)
+    status: str | None = Field(default=None, max_length=128)
+    unreachable_reason: str | None = Field(default=None, max_length=128)
+    last_active_at: str | None = Field(default=None, max_length=128)
+    is_premium: str | None = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=128)
+    member_count: str | None = Field(default=None, max_length=128)
 
     def mapped(self) -> dict[str, str]:
         return {k: v for k, v in self.model_dump().items() if v}
@@ -143,8 +159,11 @@ class SubscriberCounts(BaseModel):
     """Who a bot can reach. Counted live from its database, minus suppressions."""
 
     active: int = 0
-    blocked: int = 0  # blocked the bot (learned while sending)
-    unreachable: int = 0  # Telegram says the chat doesn't exist
+    # Who can't be reached, from the bot's own records (when mapped) and Orbit's sends.
+    blocked: int = 0  # blocked the bot
+    left: int = 0  # the bot was removed from a group or channel
+    deleted: int = 0  # the Telegram account was deleted
+    unreachable: int = 0  # Telegram says the chat doesn't exist (or another reason)
     connected: bool = False  # False: the bot has no database connected yet
     # Set when the bot's database couldn't be read; `active` is then the last cached count.
     source_error: str | None = None
@@ -152,4 +171,4 @@ class SubscriberCounts(BaseModel):
     @computed_field
     @property
     def total(self) -> int:
-        return self.active + self.blocked + self.unreachable
+        return self.active + self.blocked + self.left + self.deleted + self.unreachable

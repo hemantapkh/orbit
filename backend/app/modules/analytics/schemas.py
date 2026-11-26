@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.modules.sources.schemas import SubscriberCounts
+
 Range = Literal["7d", "30d", "90d", "12m", "all"]
 Unit = Literal["day", "week", "month"]
 
@@ -59,6 +61,18 @@ class Languages(BaseModel):
     missing_language: list[int]  # bots without "Language" mapped
 
 
+class ChatTypes(BaseModel):
+    per_bot: dict[int, dict[str, int]]  # reachable chats per type (private, group, ...)
+    group_members: dict[int, int]  # members of reachable groups and channels, summed
+    missing: list[int]  # bots without "Chat type" mapped
+
+
+class Premium(BaseModel):
+    premium: dict[int, int]  # reachable people with Telegram Premium
+    people: dict[int, int]  # reachable people (private chats), the base for the share
+    missing: list[int]  # bots without "Premium" mapped
+
+
 class BlockedPoint(BaseModel):
     t: date
     count: int
@@ -78,6 +92,9 @@ class AudienceAnalytics(BaseModel):
     growth: Growth
     overlap: Overlap
     languages: Languages
+    reach: dict[int, SubscriberCounts]  # per bot: who can receive, and why the rest can't
+    chat_types: ChatTypes
+    premium: Premium
     blocked: list[BlockedPoint]
     broadcasts: list[BroadcastMarker]  # started in the period, through any selected bot
     errors: dict[int, str]  # bots whose database couldn't be read

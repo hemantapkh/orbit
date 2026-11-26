@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 from datetime import UTC, date, datetime, timedelta
 from itertools import combinations
 
-from sqlalchemy import DateTime, String, cast, distinct, func, select
+from sqlalchemy import DateTime, String, and_, cast, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import dialect_name, utcnow
@@ -22,6 +22,7 @@ from app.modules.analytics.schemas import (
     BroadcastAnalytics,
     BroadcastMarker,
     BroadcastPerformance,
+    ChatTypes,
     ColumnChoice,
     Growth,
     GrowthPoint,
@@ -31,6 +32,7 @@ from app.modules.analytics.schemas import (
     Overlap,
     OverlapPair,
     Period,
+    Premium,
     Range,
     Unit,
 )
@@ -43,8 +45,16 @@ from app.modules.campaigns.models import (
 )
 from app.modules.sources.connection import SourceError, safe_error
 from app.modules.sources.models import BotSource, BotSuppression
-from app.modules.sources.query import _value, reflect, where_clause
+from app.modules.sources.query import (
+    GROUP_TYPES,
+    _on_related,
+    _truthy,
+    _value,
+    reflect,
+    where_clause,
+)
 from app.modules.sources.service import (
+    counts_by_bot,
     database_sources,
     engine_for,
     live_ids,
@@ -134,7 +144,16 @@ async def _bot_stats(source: BotSource, p: Period | None, prev_start: date | Non
         dialect = conn.dialect.name
         where = where_clause(src, spec)
         chat = src.base.c[m.chat_id]
-        out = {"growth": [], "before": 0, "previous": 0, "languages": [], "earliest": None}
+        out = {
+            "growth": [],
+            "before": 0,
+            "previous": 0,
+            "languages": [],
+            "earliest": None,
+            "types": {},
+            "group_members": 0,
+            "premium": None,
+        }
 
         if m.joined_at:
             joined = _value(src, m.joined_at)
@@ -178,7 +197,38 @@ async def _bot_stats(source: BotSource, p: Period | None, prev_start: date | Non
                 select(lang, func.count(distinct(chat))).where(where).group_by(lang)
             )
             out["languages"] = [(code, n) for code, n in rows]
+        if p is not None:
+            out.update(await _profile_stats(conn, src, spec, where, chat))
         return out
+
+
+async def _profile_stats(conn, src, spec, where, chat) -> dict:
+    """Chat types, group reach and premium share among reachable chats."""
+    m = spec.column_map
+    out: dict = {}
+    people = where
+    if m.chat_type:
+        kind = func.lower(cast(_value(src, m.chat_type), String))
+        rows = await conn.execute(
+            select(kind.label("k"), func.count(distinct(chat))).where(where).group_by("k")
+        )
+        out["types"] = {k or "unknown": n for k, n in rows}
+        people = and_(where, kind == "private")
+        if m.member_count:
+            out["group_members"] = (
+                await conn.scalar(
+                    select(func.coalesce(func.sum(_value(src, m.member_count)), 0)).where(
+                        where, kind.in_(GROUP_TYPES)
+                    )
+                )
+                or 0
+            )
+    if m.is_premium:
+        flag = _on_related(src, m.is_premium, _truthy)
+        total = await conn.scalar(select(func.count(distinct(chat))).where(people))
+        with_premium = await conn.scalar(select(func.count(distinct(chat))).where(people, flag))
+        out["premium"] = (with_premium or 0, total or 0)
+    return out
 
 
 # ---- the whole page --------------------------------------------------------------------------
@@ -274,6 +324,9 @@ async def audience(
             blocked[d] += n
 
     markers = await _markers(session, p, list(sources))
+    reach = await counts_by_bot(session, list(sources))
+    type_bots = [b_ for b_, s in sources.items() if spec_of(s).column_map.chat_type]
+    premium_bots = [b_ for b_, s in sources.items() if spec_of(s).column_map.is_premium]
 
     result = AudienceAnalytics(
         period=p,
@@ -302,6 +355,17 @@ async def audience(
             items=items,
             unknown=unknown,
             missing_language=[b_ for b_ in sources if b_ not in lang_bots],
+        ),
+        reach={b_: reach[b_] for b_ in sources},
+        chat_types=ChatTypes(
+            per_bot={b_: r["types"] for b_, r in per_bot.items() if b_ in type_bots},
+            group_members={b_: r["group_members"] for b_, r in per_bot.items() if b_ in type_bots},
+            missing=[b_ for b_ in sources if b_ not in type_bots],
+        ),
+        premium=Premium(
+            premium={b_: r["premium"][0] for b_, r in per_bot.items() if r["premium"]},
+            people={b_: r["premium"][1] for b_, r in per_bot.items() if r["premium"]},
+            missing=[b_ for b_ in sources if b_ not in premium_bots],
         ),
         blocked=[BlockedPoint(t=t, count=n) for t, n in sorted(blocked.items())],
         broadcasts=markers,

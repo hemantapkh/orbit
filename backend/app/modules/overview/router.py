@@ -26,6 +26,8 @@ class BotLine(BaseModel):
     avatar_version: str | None
     active: int
     blocked: int
+    left: int
+    deleted: int
     unreachable: int
     total: int
     connected: bool

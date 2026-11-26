@@ -1,12 +1,12 @@
 import asyncio
 import logging
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import AsyncIterator
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, select
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -15,9 +15,13 @@ from app.core.security import decrypt_secret
 from app.modules.sources.connection import SourceError, engines, normalize_url, safe_error
 from app.modules.sources.models import BotSource, BotSuppression, SourceKind, SourceStatus
 from app.modules.sources.query import (
+    CHUNK,
     as_chat_id,
     count_query,
     fetch_people,
+    last_active_query,
+    lost_query,
+    lost_reason,
     reflect,
     rows_query,
     search_query,
@@ -143,7 +147,7 @@ class _IdCache:
     switch counts to COUNT queries and compute unique people in a background job."""
 
     def __init__(self):
-        self._data: dict[int, tuple[float, str, frozenset[int]]] = {}
+        self._data: dict[int, tuple[float, str, frozenset[int], dict[int, str]]] = {}
         self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     @staticmethod
@@ -169,8 +173,13 @@ class _IdCache:
             return hit[2]
         return None
 
-    def put(self, source: BotSource, ids: frozenset[int]) -> None:
-        self._data[source.id] = (time.monotonic(), self._fingerprint(source), ids)
+    def put(self, source: BotSource, ids: frozenset[int], lost: dict[int, str]) -> None:
+        self._data[source.id] = (time.monotonic(), self._fingerprint(source), ids, lost)
+
+    def lost(self, source: BotSource) -> dict[int, str]:
+        """chat_id -> why the bot's own records say it can't be reached (last read)."""
+        hit = self._data.get(source.id)
+        return hit[3] if hit and hit[1] == self._fingerprint(source) else {}
 
     def lock(self, source_id: int) -> asyncio.Lock:
         return self._locks[source_id]
@@ -199,7 +208,10 @@ async def live_ids(session: AsyncSession, source: BotSource) -> frozenset[int] |
         if (ids := id_cache.fresh(source)) is not None:
             return ids
         try:
-            raw = await collect_chat_ids(await engine_for(source), spec_of(source))
+            engine, spec = await engine_for(source), spec_of(source)
+            raw = await collect_chat_ids(engine, spec)
+            lost = await collect_lost(engine, spec)
+            await clear_returned(session, source.bot_id, engine, spec)
         except Exception as exc:
             mark_error(source, exc)
             await session.commit()
@@ -209,8 +221,69 @@ async def live_ids(session: AsyncSession, source: BotSource) -> frozenset[int] |
         source.status, source.last_error, source.last_checked_at = SourceStatus.HEALTHY, None, now
         source.cached_count, source.cached_count_at = len(ids), now
         await session.commit()
-        id_cache.put(source, ids)
+        id_cache.put(source, ids, lost)
         return ids
+
+
+async def collect_lost(engine: AsyncEngine, spec: SourceSpec) -> dict[int, str]:
+    """chat_id -> blocked/left/deleted/unreachable, for chats the bot marks unreachable."""
+    out: dict[int, str] = {}
+    async with engine.connect() as conn:
+        src = await reflect(conn, spec)
+        if (stmt := lost_query(src, spec)) is None:
+            return out
+        result = await conn.stream(stmt.execution_options(yield_per=CHUNK))
+        async for part in result.mappings().partitions(CHUNK):
+            for row in part:
+                if (cid := as_chat_id(row["chat_id"])) is not None:
+                    out[cid] = lost_reason(row)
+    return out
+
+
+def _as_utc(value) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=UTC)  # naive means UTC
+
+
+async def clear_returned(
+    session: AsyncSession, bot_id: int, engine: AsyncEngine, spec: SourceSpec
+) -> None:
+    """Forget a block or failure Orbit recorded if the person used the bot after it.
+
+    Needs "Last active" mapped. Caller commits."""
+    if not spec.column_map.last_active_at:
+        return
+    recorded = {
+        cid: (sid, created)
+        for sid, cid, created in await session.execute(
+            select(BotSuppression.id, BotSuppression.chat_id, BotSuppression.created_at).where(
+                BotSuppression.bot_id == bot_id
+            )
+        )
+    }
+    if not recorded:
+        return
+    back: list[int] = []
+    async with engine.connect() as conn:
+        src = await reflect(conn, spec)
+        ids = list(recorded)
+        for i in range(0, len(ids), 1000):
+            for value, t in await conn.execute(last_active_query(src, spec, ids[i : i + 1000])):
+                if (cid := as_chat_id(value)) not in recorded:
+                    continue
+                sid, created = recorded[cid]
+                seen, failed = _as_utc(t), _as_utc(created)
+                if seen and failed and seen > failed:
+                    back.append(sid)
+    if back:
+        await session.execute(delete(BotSuppression).where(BotSuppression.id.in_(back)))
+        log.info("Bot %s: %d people used the bot again after a failed send", bot_id, len(back))
 
 
 def mark_error(source: BotSource, exc: BaseException) -> None:
@@ -225,22 +298,28 @@ async def database_counts(
 ) -> dict[int, SubscriberCounts]:
     if not sources:
         return {}
-    by_reason: dict[int, dict[str, int]] = defaultdict(dict)
+    # Read the bots first: that also forgets failures of people who came back.
+    live = {bot_id: await live_ids(session, source) for bot_id, source in sources.items()}
+    orbit_lost: dict[int, dict[int, str]] = defaultdict(dict)
     rows = await session.execute(
-        select(BotSuppression.bot_id, BotSuppression.reason, func.count())
-        .where(BotSuppression.bot_id.in_(list(sources)))
-        .group_by(BotSuppression.bot_id, BotSuppression.reason)
+        select(BotSuppression.bot_id, BotSuppression.chat_id, BotSuppression.reason).where(
+            BotSuppression.bot_id.in_(list(sources))
+        )
     )
-    for bid, reason, n in rows:
-        by_reason[bid][reason] = n
+    for bid, cid, reason in rows:
+        orbit_lost[bid][cid] = "blocked" if reason == "blocked" else "unreachable"
 
     out: dict[int, SubscriberCounts] = {}
     for bot_id, source in sources.items():
-        ids = await live_ids(session, source)
+        ids = live[bot_id]
+        # One reason per chat: the bot's own record wins over what Orbit saw while sending.
+        why = Counter({**orbit_lost[bot_id], **id_cache.lost(source)}.values())
         out[bot_id] = SubscriberCounts(
             active=len(ids) if ids is not None else (source.cached_count or 0),
-            blocked=by_reason[bot_id].get("blocked", 0),
-            unreachable=by_reason[bot_id].get("unreachable", 0),
+            blocked=why["blocked"],
+            left=why["left"],
+            deleted=why["deleted"],
+            unreachable=why["unreachable"],
             connected=True,
             source_error=None if ids is not None else source.last_error,
         )
@@ -285,9 +364,9 @@ async def search_people(session: AsyncSession, bot_id: int, q: str, limit: int =
                 {
                     "chat_id": cid,
                     "username": r.get("username"),
-                    "first_name": r.get("first_name"),
+                    "first_name": r.get("first_name") or r.get("title"),
                     "last_name": r.get("last_name"),
-                    "reachable": cid not in skip,
+                    "reachable": bool(r["can_receive"]) and cid not in skip,
                 }
             )
     return out

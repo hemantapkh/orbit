@@ -14,6 +14,8 @@ async def test_connect_bot_validates_token(client):
     assert bot["subscribers"] == {
         "active": 0,
         "blocked": 0,
+        "left": 0,
+        "deleted": 0,
         "unreachable": 0,
         "connected": False,
         "source_error": None,

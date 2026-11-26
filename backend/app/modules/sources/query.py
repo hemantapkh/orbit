@@ -16,9 +16,11 @@ from sqlalchemy import (
     Table,
     and_,
     bindparam,
+    case,
     cast,
     distinct,
     exists,
+    false,
     func,
     inspect,
     or_,
@@ -59,13 +61,25 @@ SUGGESTIONS: dict[str, list[str]] = {
     "joined_at": [
         "joined_at",
         "created_at",
+        "join_date",
         "subscribed_at",
         "registered_at",
         "date_joined",
         "created",
     ],
-    "is_active": ["is_active", "active", "is_subscribed", "subscribed", "enabled"],
+    "is_active": ["is_reachable", "is_active", "active", "is_subscribed", "subscribed", "enabled"],
+    "chat_type": ["type", "chat_type", "user_type"],
+    "status": ["status", "chat_status", "member_status"],
+    "unreachable_reason": ["unreachable_reason"],
+    "last_active_at": ["last_active_at", "last_active", "last_seen_at", "last_seen"],
+    "is_premium": ["is_premium", "premium"],
+    "title": ["title", "chat_title"],
+    "member_count": ["member_count", "members_count", "participants_count"],
 }
+
+# Telegram ChatMember.status values for a chat the bot can still message.
+REACHABLE_STATUSES = ("creator", "administrator", "member", "restricted")
+GROUP_TYPES = ("group", "supergroup", "channel")
 
 
 def suggest_mapping(column_names: list[str]) -> dict[str, str]:
@@ -351,16 +365,75 @@ def _chat(src: Resolved, spec: SourceSpec) -> Column:
     return _column(src.base, spec.column_map.chat_id)
 
 
-def where_clause(src: Resolved, spec: SourceSpec) -> ColumnElement[bool]:
+def _blank(col) -> ColumnElement[bool]:
+    return or_(col.is_(None), cast(col, String) == "")
+
+
+def _reachable_status(col) -> ColumnElement[bool]:
+    return or_(col.is_(None), func.lower(cast(col, String)).in_(REACHABLE_STATUSES))
+
+
+def known_clause(src: Resolved, spec: SourceSpec) -> ColumnElement[bool]:
+    """Every chat the source describes: chat id present and the user's filters applied."""
     mapping = spec.column_map.mapped()
     for ref in mapping.values():
         src.column(ref)  # validate every mapped column up front
     chat = _chat(src, spec)
-    conds = [chat.is_not(None)]
-    if spec.column_map.is_active:
-        conds.append(_on_related(src, spec.column_map.is_active, _truthy))
+    conds: list[ColumnElement[bool]] = [chat.is_not(None)]
     conds += [_on_related(src, f.column, lambda c, f=f: _test(c, f)) for f in spec.filters]
     return and_(*conds)
+
+
+def _reachability(src: Resolved, spec: SourceSpec) -> list[ColumnElement[bool]]:
+    """What the bot's own records say about whether a chat can still be messaged."""
+    m = spec.column_map
+    conds = []
+    if m.status:
+        conds.append(_on_related(src, m.status, _reachable_status))
+    if m.unreachable_reason:
+        conds.append(_on_related(src, m.unreachable_reason, _blank))
+    return conds
+
+
+def where_clause(src: Resolved, spec: SourceSpec) -> ColumnElement[bool]:
+    """Chats a broadcast goes to: known, active flag set, and reachable per the bot."""
+    conds = [known_clause(src, spec), *_reachability(src, spec)]
+    if spec.column_map.is_active:
+        conds.append(_on_related(src, spec.column_map.is_active, _truthy))
+    return and_(*conds)
+
+
+def lost_query(src: Resolved, spec: SourceSpec):
+    """Chats the bot's records mark unreachable, with what's known about why.
+
+    None when neither status nor unreachable reason is mapped."""
+    reach = _reachability(src, spec)
+    if not reach:
+        return None
+    m = spec.column_map
+    cols = [_chat(src, spec).label("chat_id")]
+    for fld in ("status", "unreachable_reason", "chat_type"):
+        if ref := getattr(m, fld):
+            cols.append(_value(src, ref).label(fld))
+    return select(*cols).where(known_clause(src, spec), ~and_(*reach))
+
+
+def lost_reason(row) -> str:
+    """blocked / left / deleted / unreachable, from a lost_query row."""
+    reason = str(row.get("unreachable_reason") or "").lower()
+    if reason == "deactivated":
+        return "deleted"
+    if reason:
+        return "unreachable"
+    kind = str(row.get("chat_type") or "").lower()
+    return "left" if kind in GROUP_TYPES else "blocked"
+
+
+def last_active_query(src: Resolved, spec: SourceSpec, chat_ids: list[int]):
+    if not (ref := spec.column_map.last_active_at):
+        raise SourceError('Map "Last active" first')
+    chat = _chat(src, spec)
+    return select(chat.label("chat_id"), _value(src, ref).label("t")).where(chat.in_(chat_ids))
 
 
 def rows_query(src: Resolved, spec: SourceSpec):
@@ -370,7 +443,10 @@ def rows_query(src: Resolved, spec: SourceSpec):
 
 
 def search_query(src: Resolved, spec: SourceSpec, q: str, limit: int):
-    """Match a Telegram ID exactly, or username/name as a case-insensitive substring."""
+    """Match a Telegram ID exactly, or username/name/title as a case-insensitive substring.
+
+    Searches every known chat, including ones that can't be reached, and says which can
+    (the `can_receive` column)."""
     mapping = spec.column_map.mapped()
     chat = _chat(src, spec)
     term = q.strip().lstrip("@")
@@ -378,10 +454,17 @@ def search_query(src: Resolved, spec: SourceSpec, q: str, limit: int):
     if term.lstrip("-").isdigit():
         conds.append(cast(chat, String) == term)
     pattern = f"%{term.lower()}%"
-    for fld in ("username", "first_name", "last_name"):
+    for fld in ("username", "first_name", "last_name", "title"):
         if mapping.get(fld):
             conds.append(func.lower(cast(_value(src, mapping[fld]), String)).like(pattern))
-    return rows_query(src, spec).where(or_(*conds) if conds else False).limit(limit)
+    cols = [_value(src, ref).label(fld) for fld, ref in mapping.items()]
+    cols.append(case((where_clause(src, spec), True), else_=False).label("can_receive"))
+    return (
+        select(*cols)
+        .where(known_clause(src, spec), or_(*conds) if conds else false())
+        .order_by(chat)
+        .limit(limit)
+    )
 
 
 def count_query(src: Resolved, spec: SourceSpec):
