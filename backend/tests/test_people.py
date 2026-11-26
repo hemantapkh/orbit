@@ -116,8 +116,7 @@ async def test_sorting_by_column(client):
 
 async def test_several_bots_at_once(client):
     a, b = await two_bots(client)
-    c = await connect_bot(client, 2)
-    await attach_users(client, c["id"], [(9, "nine", "Nine")])
-    both = await people(client, bot=[a, b])
-    assert both["total"] == 8 and 9 not in {p["chat_id"] for p in both["items"]}
-    assert (await people(client, bot=[b, c["id"]]))["total"] == 4  # 1, 5, 77 and 9
+    assert (await people(client, bot=[a, b]))["total"] == 8  # both bots, merged
+    assert (await people(client, bot=[b]))["total"] == 3  # 1, 5 and 77
+    only_b = await people(client, bot=[b], multi="true")
+    assert only_b["total"] == 0  # "on 2 or more" counts only the bots picked
