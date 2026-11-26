@@ -7,6 +7,7 @@ import { RequireOperator } from "./app/auth";
 import { ErrorBoundary, NotFound } from "./app/errors";
 import { Shell } from "./app/Shell";
 import { BotDetailPage } from "./features/bots/BotDetailPage";
+import { PeoplePage } from "./features/people/PeoplePage";
 import { BotsPage } from "./features/bots/BotsPage";
 import { CampaignDetailPage } from "./features/campaigns/CampaignDetailPage";
 import { CampaignEditorPage } from "./features/campaigns/CampaignEditorPage";
@@ -55,6 +56,7 @@ function OperatorRoutes() {
         <Route index element={<OverviewPage />} />
         <Route path="bots" element={<BotsPage />} />
         <Route path="bots/:botId" element={<BotDetailPage />} />
+        <Route path="people" element={<PeoplePage />} />
         <Route path="broadcasts" element={<CampaignsPage />} />
         <Route path="broadcasts/new" element={<CampaignEditorPage />} />
         <Route path="broadcasts/test-groups" element={<TestGroupsPage />} />

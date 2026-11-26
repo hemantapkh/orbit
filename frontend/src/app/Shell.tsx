@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Bot, ChartColumn, Check, ChevronsUpDown, LayoutGrid, LogOut, Megaphone, Plus, Settings } from "lucide-react";
+import { Bot, ChartColumn, Check, ChevronsUpDown, LayoutGrid, LogOut, Megaphone, Plus, Settings, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "./errors";
@@ -13,6 +13,7 @@ import { setOrgId } from "../lib/org";
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutGrid, end: true },
   { to: "/bots", label: "Bots", icon: Bot },
+  { to: "/people", label: "People", icon: Users },
   { to: "/broadcasts", label: "Broadcasts", icon: Megaphone },
   { to: "/analytics", label: "Analytics", icon: ChartColumn },
 ];

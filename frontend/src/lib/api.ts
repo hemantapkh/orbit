@@ -398,3 +398,34 @@ export type Breakdown = {
 export type OrgMember = { user_id: number; email: string; name: string; role: OrgMembership["role"]; joined_at: string };
 export type OrgInvite = { id: number; email: string; role: OrgMembership["role"]; expires_at: string; token: string | null };
 export type InvitePreview = { org_name: string; email: string; role: OrgMembership["role"]; expires_at: string; has_account: boolean };
+
+// ---- people ------------------------------------------------------------------------------
+
+export type PersonCategory = "can_receive" | "blocked" | "left" | "deleted" | "unreachable" | "excluded";
+
+export type PersonRow = {
+  chat_id: number;
+  name: string | null;
+  username: string | null;
+  kind: string | null;
+  language_code: string | null;
+  is_premium: boolean | null;
+  joined_at: string | null;
+  last_active_at: string | null;
+  bots: { bot_id: number; category: PersonCategory; joined_at: string | null; last_active_at: string | null; language_code: string | null }[];
+};
+
+export type PeoplePage = {
+  total: number;
+  page: number;
+  size: number;
+  items: PersonRow[];
+  /** bots left out because a filter needs a field they don't map */
+  skipped: Record<string, string[]>;
+  errors: Record<string, string>;
+};
+
+export type PersonDetail = {
+  person: PersonRow | null;
+  received: { campaign_id: number; campaign_name: string; bot_id: number; status: string; at: string | null; error: string | null }[];
+};
