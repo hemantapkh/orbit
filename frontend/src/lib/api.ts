@@ -55,6 +55,10 @@ export type SubscriberCounts = {
   connected: boolean;
   /** Set when the bot's database couldn't be read; counts are then the last cached ones. */
   source_error: string | null;
+  /** when these numbers were read from the bot's database */
+  refreshed_at: string | null;
+  /** a newer read is on its way */
+  refreshing: boolean;
 };
 
 export type Bot = {
@@ -206,22 +210,28 @@ export type Overview = {
     is_active: boolean;
     token_valid: boolean;
     avatar_version: string | null;
-    /** last 24 hours; null when the field it needs isn't mapped */
-    joined_24h: number | null;
-    joined_prev_24h: number | null;
-    active_24h: number | null;
-    active_7d: number | null;
-    lost_24h: Partial<Record<"blocked" | "left" | "deleted" | "unreachable", number>> | null;
     maps_status: boolean;
   })[];
   total_bots: number;
   total_active_subscribers: number;
-  unique_people: number;
   recent_campaigns: Pick<
     Campaign,
     "id" | "name" | "status" | "scheduled_at" | "started_at" | "finished_at" | "stats"
   >[];
 };
+
+/** One bot's last 24 hours, from its own database; null when the field isn't mapped. */
+export type BotRecent = {
+  joined_24h: number | null;
+  joined_prev_24h: number | null;
+  active_24h: number | null;
+  active_7d: number | null;
+  lost_24h: Partial<Record<"blocked" | "left" | "deleted" | "unreachable", number>> | null;
+  error: string | null;
+};
+
+/** Distinct people across all bots; pending while some bots haven't been read yet. */
+export type Reach = { unique_people: number; pending: boolean };
 
 export const emptyMessage = (): MessageContent => ({
   text: "",

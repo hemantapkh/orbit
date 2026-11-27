@@ -10,7 +10,11 @@ import { Button, cx, Dialog, Field, Input, StatusDot, Notice, PageHeader, Panel,
 
 export function BotsPage() {
   const [connecting, setConnecting] = useState(false);
-  const bots = useQuery({ queryKey: ["bots"], queryFn: () => api<Bot[]>("/bots") });
+  const bots = useQuery({
+    queryKey: ["bots"],
+    queryFn: () => api<Bot[]>("/bots"),
+    refetchInterval: (r) => (r.state.data?.some((b) => b.subscribers.refreshing) ? 3000 : false),
+  });
   const { can } = useOrg();
   const qc = useQueryClient();
   const refresh = useMutation({

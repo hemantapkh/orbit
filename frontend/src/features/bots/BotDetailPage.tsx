@@ -16,7 +16,11 @@ export function BotDetailPage() {
   const qc = useQueryClient();
   const nav = useNavigate();
   const key = ["bots", botId];
-  const bot = useQuery({ queryKey: key, queryFn: () => api<Bot>(`/bots/${botId}`) });
+  const bot = useQuery({
+    queryKey: key,
+    queryFn: () => api<Bot>(`/bots/${botId}`),
+    refetchInterval: (r) => (r.state.data?.subscribers.refreshing ? 3000 : false),
+  });
   const { can } = useOrg();
   const [tokenOpen, setTokenOpen] = useState(false);
 
@@ -98,6 +102,12 @@ export function BotDetailPage() {
                 <p className="text-[40px] leading-none font-semibold tracking-[-0.03em]">{fmt(s.active)}</p>
                 <p className="mt-2 text-sm text-ink-soft">
                   {s.source_error ? "can receive broadcasts (last known)" : "can receive broadcasts"}
+                  {s.refreshed_at && (
+                    <span className="block text-xs text-ink-faint">
+                      updated {ago(s.refreshed_at)}
+                      {s.refreshing && " · refreshing"}
+                    </span>
+                  )}
                 </p>
               </div>
               <dl className="flex gap-8 pb-0.5 text-sm">

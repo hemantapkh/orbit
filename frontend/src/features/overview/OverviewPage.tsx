@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { BotAvatar } from "../../components/BotAvatar";
-import { api, type Overview } from "../../lib/api";
+import { api, type BotRecent, type Overview, type Reach } from "../../lib/api";
 import { ago, fmt, pct } from "../../lib/format";
 import { buttonClass, CampaignStatusTag, cx, StatusDot, Notice, PageHeader, Panel, Skeleton } from "../../components/ui";
 
@@ -9,7 +9,8 @@ export function OverviewPage() {
   const q = useQuery({
     queryKey: ["overview"],
     queryFn: () => api<Overview>("/overview"),
-    refetchInterval: 30_000,
+    // Numbers come from each bot's last read; check back soon while a newer one is coming.
+    refetchInterval: (r) => (r.state.data?.bots.some((b) => b.refreshing) ? 3000 : 30_000),
   });
 
   return (
@@ -44,34 +45,55 @@ const LOSS: { key: "blocked" | "deleted" | "left" | "unreachable"; label: string
 ];
 
 /** Sum a per-bot number over the bots that have it; null when none do. */
-function total(bots: Line[], pick: (b: Line) => number | null | undefined) {
-  const have = bots.map(pick).filter((v): v is number => v != null);
+function total<T>(rows: T[], pick: (r: T) => number | null | undefined) {
+  const have = rows.map(pick).filter((v): v is number => v != null);
   return have.length ? have.reduce((a, b) => a + b, 0) : null;
 }
 
 function Board({ data }: { data: Overview }) {
   const bots = data.bots;
   const multi = bots.length > 1;
-  const joined = total(bots, (b) => b.joined_24h);
-  const joinedBefore = total(bots, (b) => b.joined_prev_24h);
-  const active = total(bots, (b) => b.active_24h);
-  const activeWeek = total(bots, (b) => b.active_7d);
-  const lostBy = Object.fromEntries(LOSS.map((l) => [l.key, total(bots, (b) => (b.lost_24h ? (b.lost_24h[l.key] ?? 0) : null))]));
-  const lost = total(bots, (b) => (b.lost_24h ? Object.values(b.lost_24h).reduce((a, n) => a + (n ?? 0), 0) : null));
+  // Each bot's last 24 hours loads on its own: a slow database only delays its own row.
+  const recentQueries = useQueries({
+    queries: bots.map((b) => ({
+      queryKey: ["overview", "recent", b.id],
+      queryFn: () => api<BotRecent>(`/overview/bots/${b.id}/recent`),
+      enabled: b.connected,
+      staleTime: 60_000,
+      refetchInterval: 60_000,
+    })),
+  });
+  const recent = new Map(bots.map((b, i) => [b.id, recentQueries[i].data]));
+  const loading = recentQueries.some((q) => q.isLoading);
+  const reach = useQuery({
+    queryKey: ["overview", "reach"],
+    queryFn: () => api<Reach>("/overview/reach"),
+    refetchInterval: (r) => (r.state.data?.pending ? 3000 : 60_000),
+  });
+  const rows = bots.map((b) => recent.get(b.id)).filter((r): r is BotRecent => !!r);
+  const joined = total(rows, (r) => r.joined_24h);
+  const joinedBefore = total(rows, (r) => r.joined_prev_24h);
+  const active = total(rows, (r) => r.active_24h);
+  const activeWeek = total(rows, (r) => r.active_7d);
+  const lostBy = Object.fromEntries(LOSS.map((l) => [l.key, total(rows, (r) => (r.lost_24h ? (r.lost_24h[l.key] ?? 0) : null))]));
+  const lost = total(rows, (r) => (r.lost_24h ? Object.values(r.lost_24h).reduce((a, n) => a + (n ?? 0), 0) : null));
   const change = joined != null && joinedBefore ? (joined - joinedBefore) / joinedBefore : null;
+  const oldest = bots.map((b) => b.refreshed_at).filter((t): t is string => !!t).sort()[0] ?? null;
+  const refreshing = bots.some((b) => b.refreshing);
+  const wait = (v: string) => (loading ? "…" : v);
 
   return (
     <div className="space-y-10">
       <dl className="grid gap-x-10 gap-y-6 sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_1fr_1fr]">
         <Figure
           label="Can receive"
-          value={fmt(data.unique_people)}
+          value={reach.data && !(reach.data.pending && reach.data.unique_people === 0) ? fmt(reach.data.unique_people) : "…"}
           note={multi ? `people · ${fmt(data.total_active_subscribers)} subscriptions across ${bots.length} bots` : "people right now"}
           large
         />
         <Figure
           label="Joined · 24 h"
-          value={joined == null ? "—" : fmt(joined)}
+          value={wait(joined == null ? "—" : fmt(joined))}
           note={
             joined == null
               ? "Map “Joined at” to see sign-ups"
@@ -82,12 +104,12 @@ function Board({ data }: { data: Overview }) {
         />
         <Figure
           label="Active · 24 h"
-          value={active == null ? "—" : fmt(active)}
+          value={wait(active == null ? "—" : fmt(active))}
           note={active == null ? "Map “Last active” to see activity" : `${fmt(activeWeek ?? 0)} in the last 7 days`}
         />
         <Figure
           label="Lost · 24 h"
-          value={lost == null ? "—" : fmt(lost)}
+          value={wait(lost == null ? "—" : fmt(lost))}
           note={
             lost == null
               ? "Map “Status changed at” to date losses"
@@ -102,7 +124,15 @@ function Board({ data }: { data: Overview }) {
 
       <section aria-labelledby="lines-title">
         <div className="mb-3 flex items-baseline justify-between gap-4">
-          <h2 id="lines-title" className="text-lg font-semibold">Bots</h2>
+          <h2 id="lines-title" className="text-lg font-semibold">
+            Bots
+            {oldest && (
+              <span className="ml-3 text-sm font-normal text-ink-faint">
+                updated {ago(oldest)}
+                {refreshing && " · refreshing"}
+              </span>
+            )}
+          </h2>
           <Legend />
         </div>
         <Panel className="overflow-x-auto">
@@ -120,7 +150,7 @@ function Board({ data }: { data: Overview }) {
             </thead>
             <tbody className="divide-y divide-line">
               {bots.map((b) => (
-                <BotRow key={b.id} b={b} widest={Math.max(1, ...bots.map((x) => x.total))} />
+                <BotRow key={b.id} b={b} recent={recent.get(b.id)} widest={Math.max(1, ...bots.map((x) => x.total))} />
               ))}
             </tbody>
           </table>
@@ -175,7 +205,9 @@ function Figure({ label, value, note, large }: { label: string; value: string; n
 
 const num = (v: number | null) => (v == null ? <span className="text-ink-faint">—</span> : fmt(v));
 
-function BotRow({ b, widest }: { b: Line; widest: number }) {
+function BotRow({ b, recent, widest }: { b: Line; recent: BotRecent | undefined; widest: number }) {
+  const r = recent ?? ({ joined_24h: null, joined_prev_24h: null, active_24h: null, active_7d: null, lost_24h: null, error: null } as BotRecent);
+  const cell = (v: number | null) => (b.connected && !recent ? <span className="inline-block h-3 w-10 animate-pulse rounded bg-line" /> : num(v));
   const dot = !b.is_active ? "off" : !b.token_valid || b.source_error ? "red" : "green";
   const dotLabel = !b.is_active ? "Disabled" : !b.token_valid ? "Token rejected" : b.source_error ? "Can't read the bot's database" : "Online";
   const gone = b.unreachable + b.left + b.deleted;
@@ -214,20 +246,20 @@ function BotRow({ b, widest }: { b: Line; widest: number }) {
         </p>
       </td>
       <td className="px-4 py-3.5 text-right">
-        {num(b.joined_24h)}
-        {b.joined_24h != null && b.joined_prev_24h != null && (
-          <span className="block text-xs whitespace-nowrap text-ink-faint">{fmt(b.joined_prev_24h)} the day before</span>
+        {cell(r.joined_24h)}
+        {r.joined_24h != null && r.joined_prev_24h != null && (
+          <span className="block text-xs whitespace-nowrap text-ink-faint">{fmt(r.joined_prev_24h)} the day before</span>
         )}
       </td>
-      <td className="px-4 py-3.5 text-right">{num(b.active_24h)}</td>
-      <td className="px-4 py-3.5 text-right">{num(b.active_7d)}</td>
+      <td className="px-4 py-3.5 text-right">{cell(r.active_24h)}</td>
+      <td className="px-4 py-3.5 text-right">{cell(r.active_7d)}</td>
       <td className="px-4 py-3.5 text-right text-ink-soft">
         {fmt(b.blocked)}
-        {!!b.lost_24h?.blocked && <span className="block text-xs text-status-error">+{fmt(b.lost_24h.blocked)} today</span>}
+        {!!r.lost_24h?.blocked && <span className="block text-xs text-status-error">+{fmt(r.lost_24h.blocked)} today</span>}
       </td>
       <td className="px-5 py-3.5 text-right text-ink-soft">
         {fmt(b.deleted)}
-        {!!b.lost_24h?.deleted && <span className="block text-xs text-ink-faint">+{fmt(b.lost_24h.deleted)} today</span>}
+        {!!r.lost_24h?.deleted && <span className="block text-xs text-ink-faint">+{fmt(r.lost_24h.deleted)} today</span>}
       </td>
     </tr>
   );
