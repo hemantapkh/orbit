@@ -174,7 +174,9 @@ async def save_source(bot_id: int, body: SourceSaveIn, session: SessionDep, m: A
     source.filters = [f.model_dump() for f in spec.filters]
     source.joins = [j.model_dump(by_alias=True) for j in spec.joins]
     source.status, source.last_error, source.last_checked_at = SourceStatus.HEALTHY, None, now
-    source.cached_count, source.cached_count_at = result.total, now
+    # A new mapping means new numbers: the next read counts from scratch.
+    source.cached_count, source.cached_count_at = result.total, None
+    source.cached_breakdown, source.returned_checked_at = None, None
     record(
         session,
         m.user,

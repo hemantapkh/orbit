@@ -172,6 +172,8 @@ class SubscriberCounts(BaseModel):
     connected: bool = False  # False: the bot has no database connected yet
     # Set when the bot's database couldn't be read; `active` is then the last cached count.
     source_error: str | None = None
+    refreshed_at: datetime | None = None  # when these numbers were read from the bot
+    refreshing: bool = False  # a newer read is on its way
 
     @computed_field
     @property

@@ -538,6 +538,16 @@ def detail_query(src: Resolved, spec: SourceSpec, chat_ids: list[int]):
     return select(*cols).where(known_clause(src, spec), chat.in_(chat_ids))
 
 
+def active_since_query(src: Resolved, spec: SourceSpec, dialect: str, since: datetime):
+    """Chats that used the bot at or after `since`, with when they last did."""
+    if not (ref := spec.column_map.last_active_at):
+        raise SourceError('Map "Last active" first')
+    chat = _chat(src, spec)
+    return select(chat.label("chat_id"), _value(src, ref).label("t")).where(
+        known_clause(src, spec), at_or_after(src, ref, dialect, since)
+    )
+
+
 def last_active_query(src: Resolved, spec: SourceSpec, chat_ids: list[int]):
     if not (ref := spec.column_map.last_active_at):
         raise SourceError('Map "Last active" first')

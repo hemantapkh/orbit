@@ -134,6 +134,7 @@ async def _recheck(session, telegram, bot: Bot) -> None:
     bot.last_checked_at = utcnow()
     if source := (await database_sources(session, [bot.id])).get(bot.id):
         id_cache.drop(source.id)  # next count reads the bot's database again
+        source.cached_count_at = None
 
 
 @router.post("/refresh", response_model=list[BotOut])

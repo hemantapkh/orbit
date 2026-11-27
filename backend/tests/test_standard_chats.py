@@ -243,10 +243,11 @@ async def test_overview_last_24_hours(client):
     bot = await connect_bot(client, 0)
     await connect_chats(client, bot["id"], "overview")
     line = next(b for b in (await client.get("/overview")).json()["bots"] if b["id"] == bot["id"])
+    assert line["maps_status"] is True
+    line = (await client.get(f"/overview/bots/{bot['id']}/recent")).json()
     assert (line["joined_24h"], line["joined_prev_24h"]) == (2, 1)  # Dee, the group; Ana
     assert (line["active_24h"], line["active_7d"]) == (2, 2)  # Ana was 9 days ago
     assert line["lost_24h"] == {"blocked": 1}  # Bob; the group left 3 days ago
-    assert line["maps_status"] is True
 
 
 async def test_broadcast_to_some_kinds_of_chat(client, telegram_fake, delivery_engine):

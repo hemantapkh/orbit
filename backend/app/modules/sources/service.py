@@ -3,19 +3,21 @@ import logging
 import time
 from collections import Counter, defaultdict
 from collections.abc import AsyncIterator, Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import delete, select
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.core.db import upsert_insert, utcnow
+from app.core.config import get_settings
+from app.core.db import SessionLocal, upsert_insert, utcnow
 from app.core.security import decrypt_secret
 from app.modules.sources.connection import SourceError, engines, normalize_url, safe_error
 from app.modules.sources.models import BotSource, BotSuppression, SourceKind, SourceStatus
 from app.modules.sources.query import (
     CHUNK,
+    active_since_query,
     as_chat_id,
     count_query,
     fetch_people,
@@ -32,7 +34,6 @@ from app.modules.sources.schemas import ColumnMap, PreviewOut, SourceSpec, Subsc
 
 log = logging.getLogger("orbit.sources")
 
-COUNT_TTL_SECONDS = 60
 PREVIEW_ROWS = 5
 
 
@@ -140,11 +141,8 @@ async def suppressed_ids(session: AsyncSession, bot_id: int) -> set[int]:
 
 
 class _IdCache:
-    """chat_id sets per source for ~60s, shared by counts and unique-people.
-
-    TODO(scale): this holds every chat_id of every database source in memory and re-reads
-    the full list each minute. Fine for tens of thousands of users per bot; beyond that,
-    switch counts to COUNT queries and compute unique people in a background job."""
+    """The reachable chat_id set per source, from its last refresh: unique people across
+    bots and overlap need the ids themselves, not just counts. In memory only."""
 
     def __init__(self):
         self._data: dict[int, tuple[float, str, frozenset[int], dict[int, str]]] = {}
@@ -168,7 +166,7 @@ class _IdCache:
         if (
             hit
             and hit[1] == self._fingerprint(source)
-            and time.monotonic() - hit[0] < COUNT_TTL_SECONDS
+            and time.monotonic() - hit[0] < get_settings().audience_ttl_seconds
         ):
             return hit[2]
         return None
@@ -200,31 +198,98 @@ async def collect_chat_ids(
     return ids
 
 
-async def live_ids(session: AsyncSession, source: BotSource) -> frozenset[int] | None:
-    """Current reachable chat_ids (suppressions removed), or None if the database failed.
+class _Refresher:
+    """Recomputes a bot's audience in the background: at most one run per bot at a time,
+    and only when someone asked for numbers that were stale. Idle Orbit does nothing."""
 
-    Updates the source's health and cached count. Commits."""
-    if (ids := id_cache.fresh(source)) is not None:
-        return ids
-    async with id_cache.lock(source.id):
-        if (ids := id_cache.fresh(source)) is not None:
-            return ids
-        try:
-            engine, spec = await engine_for(source), spec_of(source)
-            raw = await collect_chat_ids(engine, spec)
-            lost = await collect_lost(engine, spec)
-            await clear_returned(session, source.bot_id, engine, spec)
-        except Exception as exc:
-            mark_error(source, exc)
+    def __init__(self):
+        self._tasks: dict[int, asyncio.Task] = {}
+
+    def running(self, source_id: int) -> bool:
+        task = self._tasks.get(source_id)
+        return task is not None and not task.done()
+
+    def schedule(self, source_id: int) -> asyncio.Task:
+        task = self._tasks.get(source_id)
+        if task is None or task.done():
+            task = asyncio.create_task(_refresh(source_id))
+            self._tasks[source_id] = task
+        return task
+
+    async def wait(self, source_id: int) -> None:
+        await asyncio.shield(self.schedule(source_id))
+
+
+refresher = _Refresher()
+
+
+async def _refresh(source_id: int) -> None:
+    """Read the bot's database and store a fresh snapshot of who it can reach."""
+    try:
+        async with SessionLocal() as session:
+            source = await session.get(BotSource, source_id)
+            if source is None:
+                return
+            try:
+                engine, spec = await engine_for(source), spec_of(source)
+                raw = await collect_chat_ids(engine, spec)
+                lost = await collect_lost(engine, spec)
+                await clear_returned(session, source, engine, spec)
+            except Exception as exc:
+                mark_error(source, exc)
+                await session.commit()
+                return
+            failed = await orbit_failures(session, source.bot_id)
+            ids = frozenset(raw - set(failed))
+            # One reason per chat: the bot's own record wins over what Orbit saw sending.
+            why = Counter({**failed, **lost}.values())
+            now = utcnow()
+            source.status, source.last_error, source.last_checked_at = (
+                SourceStatus.HEALTHY,
+                None,
+                now,
+            )
+            source.cached_count, source.cached_count_at = len(ids), now
+            source.cached_breakdown = {
+                k: why[k] for k in ("blocked", "left", "deleted", "unreachable")
+            }
             await session.commit()
-            return None
-        ids = frozenset(raw - await suppressed_ids(session, source.bot_id))
-        now = utcnow()
-        source.status, source.last_error, source.last_checked_at = SourceStatus.HEALTHY, None, now
-        source.cached_count, source.cached_count_at = len(ids), now
-        await session.commit()
-        id_cache.put(source, ids, lost)
+            id_cache.put(source, ids, lost)
+    except Exception:
+        log.exception("Refreshing the audience of source %s failed", source_id)
+
+
+async def orbit_failures(session: AsyncSession, bot_id: int) -> dict[int, str]:
+    """chat_id -> blocked / unreachable, for chats Orbit saw fail while sending."""
+    rows = await session.execute(
+        select(BotSuppression.chat_id, BotSuppression.reason).where(BotSuppression.bot_id == bot_id)
+    )
+    return {cid: "blocked" if reason == "blocked" else "unreachable" for cid, reason in rows}
+
+
+def _stale(source: BotSource) -> bool:
+    if get_settings().audience_refresh_inline:  # tests: every read counts afresh
+        return True
+    at = source.cached_count_at
+    return at is None or (utcnow() - at).total_seconds() >= get_settings().audience_ttl_seconds
+
+
+async def live_ids(session: AsyncSession, source: BotSource) -> frozenset[int] | None:
+    """Reachable chat_ids (Orbit's failures removed), or None if the database failed.
+    Waits for a refresh when there's no recent one. For pages that need the ids."""
+    if not get_settings().audience_refresh_inline and (ids := id_cache.fresh(source)) is not None:
         return ids
+    await refresher.wait(source.id)
+    await session.refresh(source)
+    return id_cache.fresh(source)
+
+
+def cached_ids(source: BotSource) -> frozenset[int] | None:
+    """The last ids read, without waiting; starts a refresh when there are none."""
+    ids = id_cache.fresh(source)
+    if ids is None:
+        refresher.schedule(source.id)
+    return ids
 
 
 async def collect_lost(engine: AsyncEngine, spec: SourceSpec) -> dict[int, str]:
@@ -254,38 +319,55 @@ def _as_utc(value) -> datetime | None:
 
 
 async def clear_returned(
-    session: AsyncSession, bot_id: int, engine: AsyncEngine, spec: SourceSpec
+    session: AsyncSession, source: BotSource, engine: AsyncEngine, spec: SourceSpec
 ) -> None:
     """Forget a block or failure Orbit recorded if the person used the bot after it.
 
-    Needs "Last active" mapped. Caller commits."""
+    Only chats active since the last check are read, so this stays cheap however many
+    failures Orbit has recorded. Needs "Last active" mapped. Caller commits."""
     if not spec.column_map.last_active_at:
         return
-    recorded = {
-        cid: (sid, created)
-        for sid, cid, created in await session.execute(
-            select(BotSuppression.id, BotSuppression.chat_id, BotSuppression.created_at).where(
-                BotSuppression.bot_id == bot_id
-            )
-        )
-    }
-    if not recorded:
-        return
-    back: list[int] = []
+    now = utcnow()
+    since = source.returned_checked_at
+    seen: dict[int, datetime] = {}
     async with engine.connect() as conn:
         src = await reflect(conn, spec)
-        ids = list(recorded)
-        for i in range(0, len(ids), 1000):
-            for value, t in await conn.execute(last_active_query(src, spec, ids[i : i + 1000])):
-                if (cid := as_chat_id(value)) not in recorded:
-                    continue
-                sid, created = recorded[cid]
-                seen, failed = _as_utc(t), _as_utc(created)
-                if seen and failed and seen > failed:
-                    back.append(sid)
+        if since is None:  # first check: compare every recorded failure once
+            recorded = [
+                cid
+                for (cid,) in await session.execute(
+                    select(BotSuppression.chat_id).where(BotSuppression.bot_id == source.bot_id)
+                )
+            ]
+            for i in range(0, len(recorded), 1000):
+                for value, t in await conn.execute(
+                    last_active_query(src, spec, recorded[i : i + 1000])
+                ):
+                    if (cid := as_chat_id(value)) is not None and (at := _as_utc(t)):
+                        seen[cid] = at
+        else:  # a few minutes' overlap covers clocks and slow writes
+            query = active_since_query(src, spec, conn.dialect.name, since - timedelta(minutes=5))
+            for value, t in await conn.execute(query):
+                if (cid := as_chat_id(value)) is not None and (at := _as_utc(t)):
+                    seen[cid] = at
+    back: list[int] = []
+    ids = list(seen)
+    for i in range(0, len(ids), 1000):
+        rows = await session.execute(
+            select(BotSuppression.id, BotSuppression.chat_id, BotSuppression.created_at).where(
+                BotSuppression.bot_id == source.bot_id,
+                BotSuppression.chat_id.in_(ids[i : i + 1000]),
+            )
+        )
+        for sid, cid, created in rows:
+            if (failed := _as_utc(created)) and seen[cid] > failed:
+                back.append(sid)
     if back:
         await session.execute(delete(BotSuppression).where(BotSuppression.id.in_(back)))
-        log.info("Bot %s: %d people used the bot again after a failed send", bot_id, len(back))
+        log.info(
+            "Bot %s: %d people used the bot again after a failed send", source.bot_id, len(back)
+        )
+    source.returned_checked_at = now
 
 
 def mark_error(source: BotSource, exc: BaseException) -> None:
@@ -298,32 +380,29 @@ def mark_error(source: BotSource, exc: BaseException) -> None:
 async def database_counts(
     session: AsyncSession, sources: dict[int, BotSource]
 ) -> dict[int, SubscriberCounts]:
-    if not sources:
-        return {}
-    # Read the bots first: that also forgets failures of people who came back.
-    live = {bot_id: await live_ids(session, source) for bot_id, source in sources.items()}
-    orbit_lost: dict[int, dict[int, str]] = defaultdict(dict)
-    rows = await session.execute(
-        select(BotSuppression.bot_id, BotSuppression.chat_id, BotSuppression.reason).where(
-            BotSuppression.bot_id.in_(list(sources))
-        )
-    )
-    for bid, cid, reason in rows:
-        orbit_lost[bid][cid] = "blocked" if reason == "blocked" else "unreachable"
-
+    """Each bot's last snapshot, instantly. A stale one is refreshed in the background;
+    only a bot with no snapshot yet (or tests, see audience_refresh_inline) waits."""
+    inline = get_settings().audience_refresh_inline
+    first = [s.id for s in sources.values() if s.cached_count_at is None or (inline and _stale(s))]
+    if first:
+        await asyncio.gather(*(refresher.wait(sid) for sid in first))
+        for source in sources.values():
+            await session.refresh(source)
     out: dict[int, SubscriberCounts] = {}
     for bot_id, source in sources.items():
-        ids = live[bot_id]
-        # One reason per chat: the bot's own record wins over what Orbit saw while sending.
-        why = Counter({**orbit_lost[bot_id], **id_cache.lost(source)}.values())
+        if _stale(source):
+            refresher.schedule(source.id)
+        why = source.cached_breakdown or {}
         out[bot_id] = SubscriberCounts(
-            active=len(ids) if ids is not None else (source.cached_count or 0),
-            blocked=why["blocked"],
-            left=why["left"],
-            deleted=why["deleted"],
-            unreachable=why["unreachable"],
+            active=source.cached_count or 0,
+            blocked=why.get("blocked", 0),
+            left=why.get("left", 0),
+            deleted=why.get("deleted", 0),
+            unreachable=why.get("unreachable", 0),
             connected=True,
-            source_error=None if ids is not None else source.last_error,
+            source_error=source.last_error if source.status == SourceStatus.ERROR else None,
+            refreshed_at=source.cached_count_at,
+            refreshing=refresher.running(source.id),
         )
     return out
 

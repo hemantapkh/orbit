@@ -177,7 +177,8 @@ async def test_save_and_counts_with_suppressions(client, bot_db):
     assert counts["active"] == 3 and counts["blocked"] == 1
 
     ov = (await client.get("/overview")).json()
-    assert ov["total_active_subscribers"] == 3 and ov["unique_people"] == 3
+    assert ov["total_active_subscribers"] == 3
+    assert (await client.get("/overview/reach")).json()["unique_people"] == 3
 
     # editing without a URL keeps the saved connection
     r = await client.put(

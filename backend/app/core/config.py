@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     delivery_concurrency: int = 25  # sends in flight per batch; the rate limit still applies
     delivery_max_attempts: int = 3
     worker_poll_seconds: float = 2.0
+    # Bot audience numbers are refreshed in the background when someone looks and they're
+    # older than this. Nothing runs while nobody uses Orbit.
+    audience_ttl_seconds: int = 120
+    # Tests: refresh stale numbers before answering instead of in the background.
+    audience_refresh_inline: bool = False
 
     # Auth
     session_ttl_hours: int = 72

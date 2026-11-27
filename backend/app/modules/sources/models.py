@@ -37,6 +37,10 @@ class BotSource(Base, TimestampMixin):
     last_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     cached_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cached_count_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # Why the rest can't be reached, as of cached_count_at: blocked/left/deleted/unreachable.
+    cached_breakdown: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Up to when Orbit has checked whether people it saw fail used the bot again.
+    returned_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
 
 class BotSuppression(Base):

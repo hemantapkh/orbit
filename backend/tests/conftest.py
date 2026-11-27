@@ -18,6 +18,7 @@ os.environ.update(
     ORBIT_MEDIA_DIR=str(_tmp / "media"),
     ORBIT_RUN_WORKER_IN_API="false",
     ORBIT_SEND_RATE_PER_BOT="10000",
+    ORBIT_AUDIENCE_REFRESH_INLINE="true",
     ORBIT_BOOTSTRAP_ADMIN_EMAIL="ops@example.com",
     ORBIT_BOOTSTRAP_ADMIN_PASSWORD="correct-horse-battery",
     ORBIT_TELEGRAM_API_BASE="https://telegram.test",

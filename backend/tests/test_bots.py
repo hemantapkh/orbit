@@ -19,6 +19,8 @@ async def test_connect_bot_validates_token(client):
         "unreachable": 0,
         "connected": False,
         "source_error": None,
+        "refreshed_at": None,
+        "refreshing": False,
         "total": 0,
     }
 
@@ -42,7 +44,8 @@ async def test_counts_and_unique_people_across_bots(client):
     ov = (await client.get("/overview")).json()
     assert ov["total_bots"] == 2
     assert ov["total_active_subscribers"] == 5
-    assert ov["unique_people"] == 4  # chat 3 follows both bots
+    reach = (await client.get("/overview/reach")).json()
+    assert reach == {"unique_people": 4, "pending": False}  # chat 3 follows both bots
 
 
 def test_plain_postgres_urls_use_asyncpg():
